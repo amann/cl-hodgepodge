@@ -132,7 +132,7 @@
 
 (defgeneric etl::nth-row (object output-type))
 
-(defmethod cursor::make-cursor ((object etl::table) output-type
+(defmethod cursor::make-cursor (output-type (object etl::table)
                                 &key eof (step 1) key &allow-other-keys)
   (cursor::make-cursor (slot-value object 'rows) output-type
                        :step step :key key :eof eof))
@@ -142,8 +142,8 @@
   (let ((rsmap (gensym "RSMAP"))
         (next-row-fn (gensym "NEXT-ROW-FN")))
     `(let* ((,rsmap (,table-name ,@body))
-            (,next-row-fn (cursor::make-cursor ,table-name
-                                               (find-class 'list))))
+            (,next-row-fn (cursor::make-cursor (find-class 'list)
+                                               ,table-name)))
        (handler-case
            (loop (apply ,rsmap (funcall ,next-row-fn)))
          (cursor:no-next-element-error ())))))

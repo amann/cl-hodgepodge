@@ -53,7 +53,7 @@
              collection)))))))
 
 
-(defgeneric make-cursor (object output-type &key eof &allow-other-keys)
+(defgeneric make-cursor (output-type object &key eof &allow-other-keys)
   (:documentation "Return a cursor taking OBJECT as base and returning EOF if non nil or throwing a `no-next-element-error' if EOF is nil. A cursor is a (anonymous) function which when successively called returns a new object. The specializer OUTPUT-TYPE may be used to specify the output type by implementing an adequate conversion."))
 
 (defun make-list-cursor (list &key (step 1) key eof)
