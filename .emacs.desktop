@@ -1,0 +1,61 @@
+;; -*- mode: emacs-lisp; coding: emacs-mule; -*-
+;; --------------------------------------------------------------------------
+;; Desktop File for Emacs
+;; --------------------------------------------------------------------------
+;; Created Thu Dec 09 17:59:17 2010
+;; Desktop file format version 206
+;; Emacs version 23.1.1
+
+;; Global section:
+(setq desktop-missing-file-warning nil)
+(setq tags-file-name nil)
+(setq tags-table-list nil)
+(setq search-ring '("vc-git-command" "vc-do-command" "vc-git-command"))
+(setq regexp-search-ring nil)
+(setq register-alist nil)
+
+;; Buffer section -- buffers listed in same order as in buffer list:
+(desktop-create-buffer 206
+  "h:/usr/lib/lisp/source/ch/amann-wolowyk/oam-cursor.lisp"
+  "oam-cursor.lisp"
+  'lisp-mode
+  '(paredit-mode eldoc-mode slime-mode)
+  2651
+  '(nil nil)
+  nil
+  nil
+  '((buffer-file-coding-system . undecided-unix)))
+
+(desktop-create-buffer 206
+  "h:/usr/lib/lisp/source/ch/amann-wolowyk/oam-etl.lisp"
+  "oam-etl.lisp"
+  'lisp-mode
+  '(paredit-mode eldoc-mode slime-mode)
+  6651
+  '(nil nil)
+  nil
+  nil
+  '((buffer-file-coding-system . undecided-unix)))
+
+(desktop-create-buffer 206
+  nil
+  "amann-wolowyk"
+  'dired-mode
+  nil
+  773
+  '(nil nil)
+  t
+  '("h:/usr/lib/lisp/source/ch/amann-wolowyk/")
+  nil)
+
+(desktop-create-buffer 206
+  nil
+  "*info*"
+  'Info-mode
+  nil
+  1483
+  '(nil nil)
+  t
+  '("c:/Program Files/emacs/emacs-23.1/info/efaq" "Top")
+  '((tab-width . 8) (buffer-file-coding-system . undecided-unix) (case-fold-search . t)))
+
