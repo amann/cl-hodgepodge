@@ -100,63 +100,64 @@
    (column-names :type list :reader etl::column-names
     :documentation "List of symbols naming the columns of the table. The symbols are in the package DATAPOOL-NAME/TABLE-NAME.")))
 
-;;;; TODO: Provide restarts in order to change the names if a conflict appears with the package name.
+
 
 
 (defun ensure-table-package (datapool table-name)
-  (let ((datapool-name (restart-case
-                           (or (nth-value 1 (etl::find-datapool datapool-name))
-                               (error "No such datapool: ~S." datapool))
-                         (use-new-datapool-name (new-datapool-name)
-                           :report (lambda (s) (format s "Use new datapool name instead of ~S." datapool))
-                           :interactive (lambda ()
-                                          (format t "Enter a new value: ")
-                                          (multiple-value-list (eval (read))))
-                           (ensure-table-package new-datapool-name table-name))
-                         (make-new-datapool ()
-                           :report (lambda (s) (format s "Make new datapool with name ~S." datapool))
-                           :interactive (lambda ()
-                                          (format t "Enter a new value: ")
-                                          (multiple-value-list (eval (read))))
-                           (ensure-table-package (make-instance 'etl::datapool :name datapool) table-name)))))
+  (multiple-value-bind (datapool datapool-name)
+      (do ()
+          ((etl::find-datapool datapool)
+           (etl::find-datapool datapool))
+        (restart-case
+            (error "No such datapool: ~S." datapool)
+          (use-new-datapool-name (new-datapool-name)
+            :report (lambda (s) (format s "Use new datapool name instead of ~S." datapool))
+            :interactive (lambda ()
+                           (format t "Enter a new value: ")
+                           (multiple-value-list (eval (read))))
+            (setq datapool new-datapool-name))
+          (make-new-datapool ()
+            :report (lambda (s) (format s "Make new datapool with name ~S." datapool))
+            :interactive (lambda ()
+                           (format t "Enter a new value: ")
+                           (multiple-value-list (eval (read))))
+            (setq datapool (make-instance 'etl::datapool :name datapool)))))
     (restart-case
         (values (handler-case
-                    (make-package (format nil "~A/~A"
-                                          datapool-name table-name)
+                    (make-package (format nil "~A/~A" datapool-name table-name)
                                   :use nil)
                   (simple-error (c)
                     (error c)))
-                datapool-name table-name)
+                datapool table-name)
       (use-new-table-name (new-table-name)
         :report (lambda (s) (format s "Use new table name instead of ~S." table-name))
         :interactive (lambda ()
                        (format t "Enter a new value: ")
                        (multiple-value-list (eval (read))))
-        (ensure-table-package datapool-name new-table-name))
+        (ensure-table-package datapool new-table-name))
       (use-new-datapool-name (new-datapool-name)
         :report (lambda (s) (format s "Use new datapool name instead of ~S." datapool-name))
         :interactive (lambda ()
                        (format t "Enter a new value: ")
                        (multiple-value-list (eval (read))))
         (ensure-table-package new-datapool-name table-name)))))
+
 (defmethod shared-initialize :before ((self etl::table) slot-names
                                       &key name datapool &allow-other-keys)
   (declare (ignore slot-names))
-  (let* ((datapool (setf (slot-value self 'datapool)
-                         (or (etl::find-datapool datapool)
-                             (error "No such datapool: ~S." datapool))))
-         (db-package (etl::package datapool))
-         (name (if name
-                   (let ((name (intern (string name) db-package)))
-                     (export name db-package)
-                     (setf (slot-value self 'name) name))
-                   (error "No name given."))))
-    ( (slot-value self 'package)
-          )))
+  (multiple-value-bind (table-package datapool table-name)
+      (ensure-table-package datapool name)
+    (let* ((db-package (etl::package datapool))
+           (name (intern (string table-name) db-package)))
+      (export name db-package)
+      (setf (slot-value self 'datapool) datapool
+            (slot-value self 'name) name
+            (slot-value self 'package) table-package))
+    (pushnew self (slot-value datapool 'tables))))
+
 (defmethod shared-initialize :after ((self etl::table) slot-names
                                      &key column-names &allow-other-keys)
   (declare (ignore slot-names))
-  (pushnew self (slot-value (etl::datapool self) 'tables))
   (let* ((package (etl::package self))
          (column-names (mapcar #'(lambda (col-name)
                                    (intern col-name package))
