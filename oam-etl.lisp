@@ -93,7 +93,7 @@
   ((rows :initform (error "No data given.") :initarg :rows)
    (datapool :initform (error "No datapool given.")
              :type etl::datapool :reader etl::datapool)
-   (name :initform (error "No name given!")
+   (name :initform (error "No name given.")
          :type symbol :reader etl::name)
    (row-name :type symbol :reader etl::row-name)
    (package :type package :reader etl::package)
@@ -142,9 +142,9 @@
                        (multiple-value-list (eval (read))))
         (ensure-table-package new-datapool-name table-name)))))
 
-(defmethod shared-initialize :before ((self etl::table) slot-names
+(defmethod initialize-instance :before ((self etl::table) &rest initargs
                                       &key name datapool &allow-other-keys)
-  (declare (ignore slot-names))
+  (declare (ignore initargs))
   (multiple-value-bind (table-package datapool table-name)
       (ensure-table-package datapool name)
     (let* ((db-package (etl::package datapool))
@@ -152,7 +152,8 @@
       (export name db-package)
       (setf (slot-value self 'datapool) datapool
             (slot-value self 'name) name
-            (slot-value self 'package) table-package))
+            (slot-value self 'package) table-package)
+      (set name self))
     (pushnew self (slot-value datapool 'tables))))
 
 (defmethod shared-initialize :after ((self etl::table) slot-names
@@ -168,8 +169,7 @@
           (row-name (intern etl::*row-name* package)))
       (export row-name package)
       (setf (slot-value self 'row-name) row-name)
-      (etl::make-symbol-binder name row-name column-names)
-      (set name self))))
+      (etl::make-symbol-binder name row-name column-names))))
 
 (defun etl::delete-table (table)
   (unless (slot-unboundp table 'datapool)
