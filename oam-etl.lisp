@@ -37,6 +37,10 @@
   nil)
 (defmethod slot-unbound (class (instance etl:datapool) (slot-name (eql 'tables)))
   nil)
+
+(defgeneric etl::emptyp (object))
+(defmethod etl::emptyp ((object etl::datapool))
+  (not (slot-boundp object 'package)))
 (let ((datapools (make-hash-table :test #'eq)))
   (defmethod shared-initialize :after ((self etl::datapool) slot-names
                                        &key name &allow-other-keys)
@@ -46,9 +50,13 @@
             (gethash package datapools) self)))
   (defun etl::find-datapool (datapool)
     (etypecase datapool
+      (package (multiple-value-bind (datapool foundp)
+                   (gethash datapool datapools)
+                 (values datapool (when foundp (package-name package)))))
       (etl::datapool
-       (setf (gethash (etl::package datapool) datapools) datapool))
-      (package (nth-value 0(gethash datapool datapools)))
+       (unless (etl::emptyp datapool)
+         (values (setf (gethash (etl::package datapool) datapools) datapool)
+                 (package-name (etl::package datapool)))))
       ((or symbol string) (etl::find-datapool (find-package datapool)))))
 
   (defun etl::delete-datapool (datapool)
@@ -93,24 +101,44 @@
     :documentation "List of symbols naming the columns of the table. The symbols are in the package DATAPOOL-NAME/TABLE-NAME.")))
 
 ;;;; TODO: Provide restarts in order to change the names if a conflict appears with the package name.
-(defun ensure-table-package (datapool-name table-name)
-  (restart-case
-      (values (make-package (format nil "~A/~A"
-                                    datapool-name table-name)
-                            :use nil)
-              datapool-name table-name)
-    (use-new-table-name (new-table-name)
-      :report "Use new table name."
-      :interactive (lambda ()
-                     (format t "Enter a new value: ")
-                     (multiple-value-list (eval (read))))
-      (ensure-table-package datapool-name new-table-name))
-    (use-new-datapool-name (new-datapool-name)
-      :report "Use new table name."
-      :interactive (lambda ()
-                     (format t "Enter a new value: ")
-                     (multiple-value-list (eval (read))))
-      (ensure-table-package datapool-name new-table-name))))
+
+
+(defun ensure-table-package (datapool table-name)
+  (let ((datapool-name (restart-case
+                           (or (nth-value 1 (etl::find-datapool datapool-name))
+                               (error "No such datapool: ~S." datapool))
+                         (use-new-datapool-name (new-datapool-name)
+                           :report (lambda (s) (format s "Use new datapool name instead of ~S." datapool))
+                           :interactive (lambda ()
+                                          (format t "Enter a new value: ")
+                                          (multiple-value-list (eval (read))))
+                           (ensure-table-package new-datapool-name table-name))
+                         (make-new-datapool ()
+                           :report (lambda (s) (format s "Make new datapool with name ~S." datapool))
+                           :interactive (lambda ()
+                                          (format t "Enter a new value: ")
+                                          (multiple-value-list (eval (read))))
+                           (ensure-table-package (make-instance 'etl::datapool :name datapool) table-name)))))
+    (restart-case
+        (values (handler-case
+                    (make-package (format nil "~A/~A"
+                                          datapool-name table-name)
+                                  :use nil)
+                  (simple-error (c)
+                    (error c)))
+                datapool-name table-name)
+      (use-new-table-name (new-table-name)
+        :report (lambda (s) (format s "Use new table name instead of ~S." table-name))
+        :interactive (lambda ()
+                       (format t "Enter a new value: ")
+                       (multiple-value-list (eval (read))))
+        (ensure-table-package datapool-name new-table-name))
+      (use-new-datapool-name (new-datapool-name)
+        :report (lambda (s) (format s "Use new datapool name instead of ~S." datapool-name))
+        :interactive (lambda ()
+                       (format t "Enter a new value: ")
+                       (multiple-value-list (eval (read))))
+        (ensure-table-package new-datapool-name table-name)))))
 (defmethod shared-initialize :before ((self etl::table) slot-names
                                       &key name datapool &allow-other-keys)
   (declare (ignore slot-names))
