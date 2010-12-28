@@ -30,59 +30,80 @@
 ;;;; name/table-name -- hence none of the original names should contain a
 ;;;; slash.
 (defclass etl::datapool ()
-  ((package :reader etl::package)
-   (tables :initform nil)))
+  ((package :type package :reader etl::package)
+   (tables :initform nil :reader etl::tables)))
 
-(defmethod slot-unbound (class (instance etl::datapool) (slot-name (eql 'package)))
+(defmethod slot-unbound ((class t) (instance etl::datapool) (slot-name (eql 'package)))
   nil)
-(defmethod slot-unbound (class (instance etl::datapool) (slot-name (eql 'tables)))
+(defmethod slot-unbound ((class t) (instance etl::datapool) (slot-name (eql 'tables)))
   nil)
 
-(defgeneric etl::emptyp (object))
+(defun etl::datapool-valid-p (datapool)
+  (and (slot-boundp datapool 'package)
+       (packagep (etl::package datapool))
+       (slot-boundp datapool 'tables)))
+
+(defgeneric etl::emptyp (object)
+  (:documentation "Return T if object is valid but contains no relevant data, and NIL else."))
 (defmethod etl::emptyp ((object etl::datapool))
-  (not (slot-boundp object 'package)))
-(let ((datapools (make-hash-table :test #'eq)))
-  (eval-when (:load-toplevel)
-    (when (fboundp etl::list-all-datapools)
-      (map nil #'(lambda (x)
-                   (setf (gethash (car x) datapools) (cdr x)))
-           (etl::list-all-datapools))))
-  (defun etl::list-all-datapools (&aux result)
-    (with-hash-table-iterator (next datapools)
-      (do () (nil)
-        (multiple-value-bind (has-next-p package datapool)
-            (next)
-          (if has-next-p
-              (push (cons package datapool) result)
-              (return result))))))
-  (defmethod shared-initialize :after ((self etl::datapool) slot-names
-                                       &key name &allow-other-keys)
-    (declare (ignore slot-names))
-    (let* ((package (make-package name)))
-      (setf (slot-value self 'package) package
-            (gethash package datapools) self)))
-  (defun etl::find-datapool (datapool)
-    (etypecase datapool
-      (null (values nil nil))
-      (package (multiple-value-bind (datapool* foundp)
-                   (gethash datapool datapools)
-                 (values datapool* (when foundp (etl::package datapool)))))
-      (etl::datapool
-       (unless (etl::emptyp datapool)
-         (values (setf (gethash (etl::package datapool) datapools) datapool)
-                 (package-name (etl::package datapool)))))
-      ((or symbol string) (etl::find-datapool (find-package datapool)))))
-  (defun etl::delete-datapool (datapool)
-    (with-slots (package tables) datapool
-      (map nil #'etl::delete-table tables)
-      (when (packagep package)
-        (remhash package datapools)
-        (delete-package package)))
-    (slot-makunbound datapool 'package))
-  (defmethod reinitialize-instance :before ((self etl::datapool)
-                                            &key &allow-other-keys)
-    (etl::delete-datapool self)))
+  (and (etl::datapool-valid-p object)
+       (not (slot-value object 'tables))))
 
+(let ((datapools (if (fboundp '%get-datapools)
+                       (%get-datapools)
+                       (make-hash-table :test #'eq))))
+    (defun %get-datapools ()
+      datapools)
+    (defun %get-datapools-alist (&aux result)
+      (maphash #'(lambda (k v)
+                   (push (cons k v) result))
+               datapools)
+      result)
+    (defun %add-datapool (datapool)
+      (setf (gethash (etl::package datapool) datapools) datapool))
+    (defun %get-datapool (package)
+      (gethash package datapools))
+    (defun %rem-datapool (package)
+      (remhash package datapools)))
+
+(defmethod initialize-instance :after ((self etl::datapool) &rest initargs
+                                       &key name &allow-other-keys)
+  (declare (ignore initargs))
+  (let* ((package (make-package name)))
+    (setf (slot-value self 'package) package)
+    (%add-datapool self)))
+
+(defmethod reinitialize-instance :before ((self etl::datapool)
+                                          &key &allow-other-keys)
+  (etl::delete-datapool self))
+
+(defun etl::find-datapool (datapool-designator)
+  "Return the datapool associated to the package or package name DATAPOOL-DESIGNATOR as first value and the associated package name as second value. If DATAPOOL-DESIGNATOR is a datapool instance, it also checks the validity of the datapool and registers it if necessary. Return NIL else."
+  (etypecase datapool-designator
+    (null nil)
+    (etl::datapool
+     (when (etl::datapool-valid-p datapool-designator)
+       (%add-datapool datapool-designator)
+       (values datapool-designator
+               (package-name (etl::package datapool-designator)))))
+    (package (multiple-value-bind (datapool foundp)
+                 (%get-datapool datapool-designator)
+               (when foundp (etl::find-datapool datapool))))
+    ((or symbol string) (etl::find-datapool (find-package datapool-designator)))))
+
+(defun etl::delete-datapool (datapool)
+  "Delete all tables of DATAPOOL as well as its associated package and invalidates DATAPOOL."
+  (with-slots (package tables) datapool
+    (map nil #'etl::delete-table tables)
+    (when (packagep package)
+      (%rem-datapool package)
+      (delete-package package)))
+  (slot-makunbound datapool 'package)
+  (values))
+
+(defun etl::list-all-datapools ()
+  "Return an alist (associated-package . datapool) of all registered datapools."
+  (%get-datapools-alist))
 
 
 ;;;;;
@@ -104,13 +125,11 @@
 (defvar etl::*row-name* "@ROW@")
 
 (defclass etl::table ()
-  ((rows :initform (error "No data given.") :initarg :rows)
-   (datapool :initform (error "No datapool given.")
-             :type etl::datapool :reader etl::datapool)
-   (name :initform (error "No name given.")
-         :type symbol :reader etl::name)
-   (row-name :type symbol :reader etl::row-name)
+  ((datapool :type etl::datapool :reader etl::datapool)
+   (name :type symbol :reader etl::name)
    (package :type package :reader etl::package)
+   (rows :initform (error "No data given.") :initarg :rows)
+   (row-name :type symbol :reader etl::row-name)
    (column-names :type list :reader etl::column-names
     :documentation "List of symbols naming the columns of the table. The symbols are in the package DATAPOOL-NAME/TABLE-NAME.")))
 
@@ -164,25 +183,31 @@
       (setf (slot-value self 'datapool) datapool
             (slot-value self 'name) name
             (slot-value self 'package) table-package)
-      (set name self))
+      (set name self)
+      (eval `(declaim (special ,name))))
     (pushnew self (slot-value datapool 'tables))))
 
-(defmethod shared-initialize :after ((self etl::table) slot-names
+(defmethod shared-initialize :before ((self etl::table) slot-names
                                      &key column-names (row-name etl::*row-name*) &allow-other-keys)
   (declare (ignore slot-names))
   (let* ((package (etl::package self))
          (column-names (mapcar #'(lambda (col-name)
                                    (intern col-name package))
                                column-names)))
-    (export column-names package)
-    (setf (slot-value self 'column-names) column-names)
-    (let ((name (etl::name self))
-          (row-name (intern row-name package)))
-      (export row-name package)
-      (setf (slot-value self 'row-name) row-name)
-      (etl::make-symbol-binder name row-name column-names))))
+    (when column-names
+      (export column-names package)
+      (setf (slot-value self 'column-names) column-names))
+    (let ((name (etl::name self)))
+      (unless (slot-boundp self 'row-name)
+        (let ((row-name (intern row-name package)))
+          (export row-name package)
+          (setf (slot-value self 'row-name) row-name)))
+      (etl::make-symbol-binder name (etl::row-name self) (etl::column-names self)))))
 
 (defun etl::empty-table (table)
+  (setf (slot-value table 'rows) nil
+        (slot-value table 'column-names) nil)
+  (slot-makunbound table 'row-name)
   (let ((*package* (etl::package table)))
     (do-external-symbols (s)
       (unintern s))))
@@ -194,9 +219,10 @@
   (let ((package (etl::package table)))
     (unintern (etl::name table) package)
     (delete-package package))
-  (map nil #'(lambda (slot) (slot-makunbound table
-                                             #+ccl (ccl:slot-definition-name slot)
-                                             #+sbcl (sb-mop:slot-definition-name slot)))
+  (map nil #'(lambda (slot)
+               (slot-makunbound table
+                                #+ccl (ccl:slot-definition-name slot)
+                                #+sbcl (sb-mop:slot-definition-name slot)))
        #+ccl (ccl:class-slots (class-of table))
        #+sbcl (sb-mop:class-slots (class-of table))))
 
@@ -224,77 +250,57 @@
          (cursor:no-next-element-error ())))))
 
 (labels
-    ((get-map (hash-table columns)
-       (if columns
+    ((get-map (hash-table keys)
+       (if keys
            (handler-case
-               (get-map (gethash hash-table (first columns)) (rest 
-                                                              columns))
+               (get-map (gethash (first keys) hash-table) (rest keys))
              (type-error ()))
            hash-table))
-     (add-map (hash-table column value rest-columns)
-       (if rest-columns
-           (destructuring-bind (col test) (first rest-columns)
-             (add-map (or (gethash (funcall column value) hash-table)
-                          (setf (gethash (funcall column value) hash-table)
+     (add-map (hash-table cur-key rest-keys-tests value)
+       (if rest-keys-tests
+           (destructuring-bind (key test) (first rest-keys-tests)
+             (add-map (or (gethash cur-key hash-table)
+                          (setf (gethash cur-key hash-table)
                                 (make-hash-table :test test)))
-                      col value (rest rest-columns)))
-           (push value (gethash column hash-table)))))
+                      key (rest rest-keys-tests) value))
+           (push value (gethash cur-key hash-table)))))
   (defmacro etl::define-table-index (name (&rest columns) table)
-    "Return a function NAME which define an index on the columns given in COLUMNS of table TABLE."
-    (let* ((columns (mapcar #'(lambda (col)
-                                (etypecase col
-                                  (symbol (list col #'eql))
-                                  (cons col)))
-                            columns))
-           (args (mapcar #'car columns)))
-      `(let* ((table ,table)
-              (row-name (etl::row-name table))
-              (hash-table (make-hash-table :test ,(cadar columns))))
+    "Return a function NAME which defines an index on the columns given in COLUMNS of table TABLE."
+    (let* ((colnames-tests (mapcar #'(lambda (col)
+                                       (etypecase col
+                                         (symbol (list col #'eql))
+                                         (cons col)))
+                                   columns))
+           (args (mapcar #'car colnames-tests))
+           (table (etypecase table
+                    (symbol (symbol-value table))
+                    (etl::table table)))
+           (table-name (etl::name table))
+           (datapool (etl::datapool table))
+           (row-name (etl::row-name (find table (etl::tables datapool)))))
+      `(let* ((hash-table (make-hash-table :test ,(cadar colnames-tests))))
          (defun ,name (,@args)
-           ,(format nil "Index of table ~S on the columns ~{~A~#[~; and ~:;, ~]~} returning a list of the rows which correspond to those columns." table args)
+           ,(format nil "Index of table ~S on the columns ~{~A~#[~; and ~:;, ~]~} returning a list of the rows which correspond to those columns." table-name args)
            (funcall ,#'get-map hash-table (list ,@args)))
-         (etl::do-table-rows ,table
-           (funcall ,#'add-map hash-table ,(caar columns) row-name ',(rest columns)))))))
-
-
-#+ (or)
-(labels
-    ((get-map (hash-table columns)
-       (handler-case
-           (get-map (gethash hash-table (first columns)) (rest columns))
-         (type-error ())))
-     (add-map (hash-table columns value test)
-       (if (= 1 (length columns))
-           (push value (gethash (first columns) hash-table))
-           (add-map (let ((col (first columns)))
-                      (or (gethash col hash-table)
-                          (setf (gethash col hash-table)
-                                (make-hash-table :test test))))
-                    (rest columns) test))))
-  (defmacro define-table-index (name (&rest columns) table)
-    "Define an index on the columns given in COLUMNS of table TABLE."
-    (let* ((tbl (gensym "TABLE")))
-      `(let ((,tbl ,table)
-             (hash-table (make-hash-table))) 
-         (defun ,name (,@(mapcar #'(lambda (col)
-                                      (etypecase col
-                                        (symbol col)
-                                        (cons (first col))))
-                                 columns))
-           (funcall #'get-map ))))))
-
-
+         (export ',name (symbol-package ',name))
+         (etl::do-table-rows ,table-name
+           (funcall ,#'add-map hash-table ,(caar colnames-tests)
+                    (list ,@(mapcar #'(lambda (x)
+                                        `(list ,(car x) ,(cadr x)))
+                                    (rest colnames-tests)))
+                    ,row-name))))))
 
 
 (defgeneric etl::to-list (object &key &allow-other-keys))
+(defmethod etl::to-list ((object sequence) &key key &allow-other-keys)
+  (map 'list (or key #'identity) object))
 (defmethod etl::to-list ((object list) &key key &allow-other-keys)
   (if key
       (call-next-method)
       object))
-(defmethod etl::to-list ((object sequence) &key key &allow-other-keys)
-  (map 'list (or key #'identity) object))
 
-(defgeneric etl::map-from-to (from-domain to-domain value))
+(defgeneric etl::map-from-to (from-domain to-domain value)
+  (:documentation "Return an entity"))
 
 (eval-when (:load-toplevel :execute)
   (let ((package (find-package '#:etl)))

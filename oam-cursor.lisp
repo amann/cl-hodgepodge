@@ -26,12 +26,12 @@
     (ecase type
       ((nil) (handler-case
                  (loop (apply fn (mapcar #'funcall cursors)))
-               (no-next-element-error ())))
+               (cursor::no-next-element-error ())))
       (list (let (collection)
               (handler-case
                   (loop (push (apply fn (mapcar #'funcall cursors))
                               collection))
-                (no-next-element-error ()
+                (cursor::no-next-element-error ()
                   (nreverse collection)))))
       ((vector string)
        (let ((collection (case type
@@ -46,7 +46,7 @@
                (loop (vector-push-extend
                       (apply fn (mapcar #'funcall cursors))
                       collection))
-           (no-next-element-error ()
+           (cursor::no-next-element-error ()
              collection)))))))
 
 
@@ -59,7 +59,7 @@
 		   step
 		   1))
 	 (test `(null list))
-	 (eof-signal (or eof '(error 'no-next-element-error)))
+	 (eof-signal (or eof '(error 'cursor::no-next-element-error)))
 	 (get (if key
                   `(funcall ,key (car list))
                   '(car list)))
@@ -87,7 +87,7 @@
 			    (< step 0 (- n to))))
 	       to))
 	 (test (when to `(<= ,to n)))
-	 (eof-signal (or eof '(error 'no-next-element-error)))
+	 (eof-signal (or eof '(error 'cursor::no-next-element-error)))
 	 (get 'n)
 	 (next `(incf n ,step)))
     (eval `(let ((n ,n))
