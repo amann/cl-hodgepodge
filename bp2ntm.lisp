@@ -52,6 +52,7 @@
                    :Server "q014mu.swisslife.ch"
                    :Uid "ADAPTIV_READ"
                    :Pwd "adaq14mu"))))
+
 (defvar blueprint::*queries* '((:pos "select *
 from (select * from BLUEPRINT.ADAPTIV_DMAEXP_POSITION pos
 	where pos.ISREXP_POS = 1 and (pos.PFPORTFOLIOTYPE = 'OR' or pos.BASKETTYPE_LOCAL_CODE = 'SLINDEX'))
@@ -92,59 +93,41 @@ where P_DMASI_SIGNATURE_id in (select ID
       (plain-odbc:exec-query* blueprint::*bp-connection* sql parameters)
     (make-instance 'etl::table
                    :datapool blueprint::*datapool*
-                   :name name
+                   :name (string name)
+                   :rows rows
+                   :columns columns)))
+(defun blueprint::reload-table (table sql parameters)
+  (multiple-value-bind (rows columns)
+      (plain-odbc:exec-query* blueprint::*bp-connection* sql parameters)
+    (reinitialize-instance table
                    :rows rows
                    :columns columns)))
 
-#+ (or)
-(progn (plain-odbc:exec-command connection "set TRANSACTION read only")
-       resultset
-       (resultset (plain-odbc:exec-sql* connection sql-query parameters)))
+(defun blueprint::load-data (connection where-clause parameters)
+  (handler-case
+      (progn
+        (plain-odbc:exec-command connection "set TRANSACTION read only")
+        (dolist (query blueprint::*queries*)
+           (destructuring-bind (name sql) query
+             (let ((table (find name (etl:tables blueprint::*datapool*)
+                                :test #'string= :key #'(lambda (tbl) (string (etl:name tbl)))))
+                   (sql (format nil sql where-clause)))
+              (if table
+                  (blueprint::reload-table table sql)
+                  (blueprint::make-sql-table name sql parameters)))))
+        (plain-odbc:commit connection))
+    (error (c)
+      (plain-odbc:rollback connection))))
 
 
 
+(defun blueprint::make-feature-indices ()
+  (etl:define-table-index bp::leg-sig-posrn (bp.leg:signature bp.leg:position_rn) bp::leg)
+  (etl:define-table-index bp:amo-sig-posrn (bp.amo:p_dmasi_signature_id bp.amo:s_dmaph_pos_rn) bp:amo)
+  (etl:define-table-index bp:cap-sig-posrn (bp.cap:p_dmasi_signature_id bp.cap:s_dmaph_pos_rn) bp:cap)
+  (etl:define-table-index bp:cpn-sig-posrn (bp.cpn:p_dmasi_signature_id bp.cpn:s_dmaph_pos_rn)bp:cpn))
 
 
-
-
-(defmacro blueprint::make-feature-map (feature signature-key pos-rn-key)
-  (let* ((package (symbol-package feature))
-         (map-symbol (intern (format nil "~A-MAP" (symbol-name feature)) package))
-         (feature-table (gensym "FEATURE-TABLE")))
-    (export map-symbol package)
-    `(let ((hash-table (make-hash-table :test #'eql))
-           (,feature-table ,feature))
-       (defun ,map-symbol
-           (signature pos-row-number)
-           (handler-case
-               (gethash pos-row-number (gethash signature hash-table))
-             (type-error ())))
-       (labels
-           ((add-leg-map (signature pos-row-number value)
-              (push value (gethash pos-row-number (or (gethash signature hash-table)
-                                                      (setf (gethash signature hash-table)
-                                                            (make-hash-table :test #'eql)))))))
-         (etl:do-table-rows ,feature
-           (add-leg-map ,signature-key ,pos-rn-key (etl:row-name ,feature-table)))))))
-
-;(blueprint::make-feature-map bp:leg bp.leg:signature bp.leg:position_rn)
-;(blueprint::make-feature-map bp:amo bp.amo:p_dmasi_signature_id bp.amo:s_dmaph_pos_rn)
-;(blueprint::make-feature-map bp:cap bp.cap:p_dmasi_signature_id bp.cap:s_dmaph_pos_rn)
-;(blueprint::make-feature-map bp:cpn bp.cpn:p_dmasi_signature_id bp.cpn:s_dmaph_pos_rn)
-;
-
-
-
-
-
-#+nil(sort (with-package-iterator (next-symbol '(bp.pos) :external)
-        (loop
-           collect
-           (multiple-value-bind (more? symbol) (next-symbol)
-             (if more? 
-                 symbol
-                 (return symbols))) into symbols))
-      #'string<)
 
 
 
