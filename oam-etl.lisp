@@ -13,9 +13,14 @@
 (defpackage #:ch.amann-wolowyk.oam-etl
   (:use)
   (:nicknames #:etl))
+#+ch.amann-wolowyk.oam-etl-system-test
+(defpackage #:ch.amann-wolowyk.oam-etl-system-test
+  (:use)
+  (:nicknames #:etl-test))
 (defpackage #:ch.amann-wolowyk.oam-etl-system
   (:use #:cl))
 (in-package #:ch.amann-wolowyk.oam-etl-system)
+
 
 ;;;;** Datapools
 ;;;; Datapools are where You can fetch data but not write.
@@ -105,20 +110,49 @@
   "Return an alist (associated-package . datapool) of all registered datapools."
   (%get-datapools-alist))
 
+;;;;*** Datapools test
+#+ch.amann-wolowyk.oam-etl-system-test
+(progn
+  (defvar etl-test::*datapool* nil)
+  (utest:define-unit-test etl-test::datapool ()
+    (setq etl-test::*datapool* (make-instance 'etl::datapool :name "FOO"))
+    (etl::find-datapool "FOO")
+    (etl::find-datapool etl-test::*datapool*)
+    (etl::find-datapool (etl::package etl-test::*datapool*))
+    (progn
+      (etl::delete-datapool etl-test::*datapool*)
+      (null (etl::find-datapool "FOO")))
+    (not (etl::datapool-valid-p etl-test::*datapool*))))
+
+
 
-;;;;;
+;;;;** Some Utilities
+;;;;
+;;;;*** Make-symbol-binder
 
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defun etl::make-symbol-binder (name whole symbols)
+    "Define a macro named NAME and which returns an anonymous function taking as many arguments as are symbols in the list SYMBOLS and which are bound in BODY of the macro in respective order to all those symbols; The symbol at place WHOLE is bound to the whole list of all arguments."
+    (eval `(defmacro ,name (&body body)
+             ,(format nil "Return an anonymous function taking ~A argument~:*~Ps which are bound in BODY in respective order to the symbols ~{~S~#[~; and ~:;, ~]~}; The symbol ~S is bound to the whole list of all arguments."
+                      (length symbols) symbols whole)
+             `#'(lambda ,',symbols
+                  (declare (ignorable ,@',symbols))
+                  (let ((,',whole (list ,@',symbols)))
+                    (declare (ignorable ,',whole))
+                    ,@body))))))
 
-(defun etl::make-symbol-binder (name whole symbols)
-  "Define a macro named NAME and which returns an anonymous function taking as many arguments as are symbols in the list SYMBOLS and which are bound in BODY of the macro in respective order to all those symbols; The symbol at place WHOLE is bound to the whole list of all arguments."
-  (eval `(defmacro ,name (&body body)
-           ,(format nil "Return an anonymous function taking ~A argument~:*~Ps which are bound in BODY in respective order to the symbols ~{~S~#[~; and ~:;, ~]~}; The symbol ~S is bound to the whole list of all arguments."
-                    (length symbols) symbols whole)
-           `#'(lambda ,',symbols
-                (declare (ignorable ,@',symbols))
-                (let ((,',whole (list ,@',symbols)))
-                  (declare (ignorable ,',whole))
-                  ,@body)))))
+;;;;**** Make-symbol-binder Test
+;;;;
+#+ch.amann-wolowyk.oam-etl-system-test
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (etl::make-symbol-binder 'etl-test::foo 'etl-test::row '(etl-test::a etl-test::b)))
+#+ch.amann-wolowyk.oam-etl-system-test
+(let ((fn (etl-test::foo (- (+ etl-test::a etl-test::b)
+                            (apply #'+ etl-test::row)))))
+  (utest:define-unit-test etl-test::make-symbol-binder ()
+    (fboundp 'etl-test::foo)
+    (= 0 (funcall fn 3 5))))
 
 ;;;;** Tables
 ;;;; A table is a list of rows, is given a name and associated to a datapool.
@@ -203,6 +237,9 @@
           (export row-name package)
           (setf (slot-value self 'row-name) row-name)))
       (etl::make-symbol-binder name (etl::row-name self) (etl::column-names self)))))
+
+
+
 
 (defun etl::empty-table (table)
   (setf (slot-value table 'rows) nil
@@ -299,8 +336,8 @@
       (call-next-method)
       object))
 
-(defgeneric etl::map-from-to (from-domain to-domain value)
-  (:documentation "Return an entity"))
+(defgeneric etl::get-mapping-function (from-domain to-domain mappingrule)
+  (:documentation "Return a function mapping the values from FROM-DOMAIN to values in TO-DOMAIN according to the rule MAPPINGRULE."))
 
 (eval-when (:load-toplevel :execute)
   (let ((package (find-package '#:etl)))
