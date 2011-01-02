@@ -308,7 +308,7 @@
   (mapcan #'(lambda (x)
               (list (car x) (cadr x)))
           alist2))
-#+(or)
+
 (let ((package (find-package #:oam)))
   (do-symbols (symbol package)
     (when (eq (symbol-package symbol) package)
