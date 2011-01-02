@@ -1,10 +1,11 @@
 ;;;; -*- outline-regexp:";;;;[*]+ +" -*-
 ;;;; $Id: bp2ntm.lisp,v 1.2 2010/05/17 16:01:44 amao Exp $
 ;;;;* NTM
-(defpackage #:ntm
-  (:export #:@))
-(defpackage #:ntm-user
-  (:use #:cl #:ntm))
+(defpackage #:ch.swisslife.ntm
+  (:use)
+  (:nicknames #:ntm))
+(defpackage #:ch.swisslife.ntm-system
+  (:use #:cl))
 
 ;;;;** Utilities for NTM processing
 (defconstant ntm::+default-dom-type+ :lxml)
@@ -33,11 +34,12 @@
                                       (declare (ignore k))
                                       (list (gensym) v))
                                   attributes)))
-   `(ntm::make-node ,name (let ,bindings
-                            ,(cons 'list (mapcan #'(lambda (p b)
-                                                     `(',(car p) (car (ntm::value ,(car b)))))
-                                                 (oam::alist<-plist attributes)
-                                                 bindings))) ,@(apply #'ntm::value values))))
+   `(ntm::make-node ,name
+                    (let ,bindings
+                      ,(cons 'list (mapcan #'(lambda (p b)
+                                               `(',(car p) (car (ntm::value ,(car b)))))
+                                           (oam::alist<-plist attributes)
+                                           bindings))) ,@(apply #'ntm::value values))))
 (defmacro ntm::@ (name &body values)
   (let* ((attributes (mapcan #'(lambda (x)
                                  (when (and (consp x) (eq :@ (car x)))
@@ -65,7 +67,8 @@
              (delete nil (list ,@(mapcar #'car v-bindings)))))))
 
 
-#+nil(eval-when (:compile-toplevel :load-toplevel :execute)
+#+(or)
+(eval-when (:compile-toplevel :load-toplevel :execute)
   (let (saved-readtable
         (modified-readtable (copy-readtable)))
     (set-dispatch-macro-character #\# #\@ #'(lambda (s c n) (declare (ignore c n)) `(ntm::@ ,@(read s nil (values) t))) modified-readtable)
@@ -758,7 +761,7 @@
            "~%(~S ~@[(:@~{ ~S~})~]~{ ~A~})" tag attributes values))))
 
 
-#+nil
+#+ (or)
 (ntm::readable-print-lsxml (s-xml:parse-xml-file
                             #p"h:/temp/61465.xml"
                             :output-type :lxml) t :type :lxml)
@@ -766,75 +769,76 @@
 
 
 
-#+nil(:|NTMMessage| (:@ :|version| "1.03") 
-    (:|NTMHeader|  
-        (:|MessageID|  "91fa29d8-676c-426c-b729-8b45ba9ae3f3") 
-        (:|MessageSource|  
-            (:|SystemID|  "Panorama") 
-            (:|Location| )) 
-        (:|Timezone|  "GMT") 
-        (:|DateFormat| (:@ :|format| "ISO8601")) 
-        (:|GeneratedTime|  "2010-07-22T11:43:28") 
-        (:|PublishResponse| (:@ :|value| "JustLog"))) 
-    (:|NTMTrade|  
-        (:|TradeHeader|  
-            (:|SysTradeID|  
-                (:|SystemID|  "Panorama") 
-                (:|Location| ) 
-                (:|TradeID|  "61465")) 
-            (:|TradeDate|  "2010-07-21T11:07:27") 
-            (:|OriginEntity|  
-                (:|Entity| (:@ :|role| "Owner") 
-                    (:|Organization| ) 
-                    (:|Trader|  "MGR"))) 
-            (:|OtherEntity|  
-                (:|Entity| (:@ :|role| "Counterparty") 
-                    (:|Organization|  "DERIV"))) 
-            (:|TradeDescription| ) 
-            (:|TradeRole| (:@ :|value| "Potential")) 
-            (:|TradeMessageRole| (:@ :|value| "New"))) 
-        (:|TradeTags|  
-            (:|TradingArea|  "A") 
-            (:|AccountingArea|  "CH") 
-            (:|AccountingGroup|  "CH") 
-            (:|Extensions|  
-                (:|Extension|  
-                    (:|ExtName|  "UserTradeDate") 
-                    (:|ExtValue| (:@ :|datatype| "Datetime") "2010-02-25T00:00:00"))) 
-            (:|InstrumentID|  "61465")) 
-        (:|Payment|  
-            (:|PayOrReceive| (:@ :|value| "Pay")) 
-            (:|Cashflow| (:@ :|CFLType| "Principal") 
-                (:|CashflowID|  "{595C6CFB-B437-445C-B8BB-12EE20E47519}") 
-                (:|CashflowPayment|  
-                    (:|PayDate|  "2010-03-01") 
-                    (:|Amount|  "1000000") 
-                    (:CCY  "EUR")))) 
-        (:|Extensions|  
-            (:|Extension|  
-                (:|ExtName|  "Market1") 
-                (:|ExtValue| (:@ :|datatype| "String") "MARKET")) 
-            (:|Extension|  
-                (:|ExtName|  "OverrideMapping") 
-                (:|ExtValue| (:@ :|datatype| "Integer") "1")) 
-            (:|Extension|  
-                (:|ExtName|  "AnalyticsRepresentationStr") 
-                (:|ExtValue| (:@ :|datatype| "String") "Object=StructuredDeal,Reference=61465,MtM=<undefined>,Description=Structured Deal,Buy_Sell=Buy,Currency=
+#+ (or)
+(:|NTMMessage| (:@ :|version| "1.03") 
+  (:|NTMHeader|  
+    (:|MessageID|  "91fa29d8-676c-426c-b729-8b45ba9ae3f3") 
+    (:|MessageSource|  
+      (:|SystemID|  "Panorama") 
+      (:|Location| )) 
+    (:|Timezone|  "GMT") 
+    (:|DateFormat| (:@ :|format| "ISO8601")) 
+    (:|GeneratedTime|  "2010-07-22T11:43:28") 
+    (:|PublishResponse| (:@ :|value| "JustLog"))) 
+  (:|NTMTrade|  
+    (:|TradeHeader|  
+      (:|SysTradeID|  
+        (:|SystemID|  "Panorama") 
+        (:|Location| ) 
+        (:|TradeID|  "61465")) 
+      (:|TradeDate|  "2010-07-21T11:07:27") 
+      (:|OriginEntity|  
+        (:|Entity| (:@ :|role| "Owner") 
+          (:|Organization| ) 
+          (:|Trader|  "MGR"))) 
+      (:|OtherEntity|  
+        (:|Entity| (:@ :|role| "Counterparty") 
+          (:|Organization|  "DERIV"))) 
+      (:|TradeDescription| ) 
+      (:|TradeRole| (:@ :|value| "Potential")) 
+      (:|TradeMessageRole| (:@ :|value| "New"))) 
+    (:|TradeTags|  
+      (:|TradingArea|  "A") 
+      (:|AccountingArea|  "CH") 
+      (:|AccountingGroup|  "CH") 
+      (:|Extensions|  
+        (:|Extension|  
+          (:|ExtName|  "UserTradeDate") 
+          (:|ExtValue| (:@ :|datatype| "Datetime") "2010-02-25T00:00:00"))) 
+      (:|InstrumentID|  "61465")) 
+    (:|Payment|  
+      (:|PayOrReceive| (:@ :|value| "Pay")) 
+      (:|Cashflow| (:@ :|CFLType| "Principal") 
+        (:|CashflowID|  "{595C6CFB-B437-445C-B8BB-12EE20E47519}") 
+        (:|CashflowPayment|  
+          (:|PayDate|  "2010-03-01") 
+          (:|Amount|  "1000000") 
+          (:CCY  "EUR")))) 
+    (:|Extensions|  
+      (:|Extension|  
+        (:|ExtName|  "Market1") 
+        (:|ExtValue| (:@ :|datatype| "String") "MARKET")) 
+      (:|Extension|  
+        (:|ExtName|  "OverrideMapping") 
+        (:|ExtValue| (:@ :|datatype| "Integer") "1")) 
+      (:|Extension|  
+        (:|ExtName|  "AnalyticsRepresentationStr") 
+        (:|ExtValue| (:@ :|datatype| "String") "Object=StructuredDeal,Reference=61465,MtM=<undefined>,Description=Structured Deal,Buy_Sell=Buy,Currency=
   Object=StructuredDeal,Reference=61465,MtM=<undefined>,Description=Structured Deal,Buy_Sell=Buy,Currency=EUR
     Object=EquityVarianceSwapDeal,Reference=,MtM=<undefined>,Currency=EUR,Maturity_Date=23Apr2010,Pay_Receive=Pay,Strike=17%,Realised_Volatility=28.365%,Effective_Date=15Feb2010,Vega_Notional=340,Equity=SX5E
 ")) 
-            (:|Extension|  
-                (:|ExtName|  "NetPVFees") 
-                (:|ExtValue| (:@ :|datatype| "Float") "0")) 
-            (:|Extension|  
-                (:|ExtName|  "NetPVPremium") 
-                (:|ExtValue| (:@ :|datatype| "Float") "0")) 
-            (:|Extension|  
-                (:|ExtName|  "NetPVTrade") 
-                (:|ExtValue| (:@ :|datatype| "Float") "3076.21020507813")) 
-            (:|Extension|  
-                (:|ExtName|  "NetPVCurrency") 
-                (:|ExtValue| (:@ :|datatype| "String") "EUR")))))NIL
+      (:|Extension|  
+        (:|ExtName|  "NetPVFees") 
+        (:|ExtValue| (:@ :|datatype| "Float") "0")) 
+      (:|Extension|  
+        (:|ExtName|  "NetPVPremium") 
+        (:|ExtValue| (:@ :|datatype| "Float") "0")) 
+      (:|Extension|  
+        (:|ExtName|  "NetPVTrade") 
+        (:|ExtValue| (:@ :|datatype| "Float") "3076.21020507813")) 
+      (:|Extension|  
+        (:|ExtName|  "NetPVCurrency") 
+        (:|ExtValue| (:@ :|datatype| "String") "EUR")))))NIL
 
 
 
@@ -846,7 +850,8 @@
 
 
 
-#+nil((:|NTMMessage| :|version| "1.03")
+#+(or)
+((:|NTMMessage| :|version| "1.03")
  (:|NTMHeader|
    (:|MessageID| "87a1291e-85e0-4e4e-8c8b-bcbfaafcb96b")
    (:|MessageSource| (:|SystemID| "Panorama") :|Location|)
@@ -933,3 +938,8 @@
      (:|Extension|
        (:|ExtName| "Note")
        ((:|ExtValue| :|datatype| "String") "1051023186XS024194663002")))))
+
+(let ((package (find-package #:ntm)))
+  (do-symbols (symbol package)
+    (when (eq (symbol-package symbol) package)
+      (export symbol package))))
