@@ -8,11 +8,7 @@
   :name "OAM-UTIL"
   :author "me"
   :components
-  ((:file "oam-util")
-   (:file "oam-clos")
-   (:file "oam-date")
-   #+(or) (:file "oam-etl")
-   #+(or) (:file "oam-sxml"))
+  ((:file "oam-util"))
   :serial t)
 
   

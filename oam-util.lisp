@@ -15,7 +15,7 @@
   (etypecase target
     (cons
      (let ((positions (mapcan #'(lambda (targ)
-                                  (multiple-value-bind (pos targ) (match-string targ string)
+                                  (multiple-value-bind (pos targ) (oam::match-string targ string)
                                     (when pos (list (list pos targ)))))
                               target)))
        (apply #'values (reduce #'(lambda (&optional prev curr)
@@ -42,16 +42,17 @@
   (if (string= "" string)
       prefix
       (multiple-value-bind (position target)
-          (match-string targets string)
+          (oam::match-string targets string)
         (let* ((prefix (concatenate 'string prefix (if position (concatenate 'string (subseq string 0 position) replace) string)))
                (string (if position (subseq string (+ position (length target))) "")))
-          (string-replace prefix replace targets string)))))
+          (oam::string-replace prefix replace targets string)))))
 
 
 ;;;;* Macros
 (defun oam::function-arg-list (fn)
+  "return the arg list of `fn'."
   #+clisp (ext:arglist fn)
-  #+sbcl (sb-introspect:function-arglist fn)
+  #+sbcl (sb-introspect:function-lambda-list fn)
   #+lucid (system::arglist fn)
   #+allegro (excl::arglist fn)
   #+openmcl (ccl:arglist fn)
@@ -68,7 +69,7 @@
 ;;; function cell and knows how to take apart lexical closures
 ;;; and compiled code objects found there.
 #+cmu
-(defun function-arg-list (x &optional original-x)
+(defun oam::function-arg-list (x &optional original-x)
   (typecase x
     (symbol (function-arg-list (symbol-function x) x))
     (compiled-function (read-from-string
@@ -86,6 +87,7 @@
        '())))
 
 (defun oam::get-parameter-list (lambda-list)
+  "Return the argument list used to call a function whose arg list is `lambda-list'."
   (let (rest)
     (append
      (mapcan (let ((state '&ordinary))
@@ -94,7 +96,7 @@
                      (progn (setq state x) nil)
                      (case state
                        (&ordinary (etypecase x
-                                    (list (list (get-parameter-list x)))
+                                    (list (list (oam::get-parameter-list x)))
                                     (symbol (list x))))
                        (&optional (list (or (and (consp x) (car x)) x)))
                        ((&rest &body) (progn (setq rest x) nil))
@@ -113,6 +115,7 @@
      (list rest))))
 
 (defun oam::get-lambda-variables (lambda-list)
+  "Return an alist2 containing the assignments of the variable names and their default value (if provided) defined in an ordinary or macro lambda list `lambda-list'. Useful for assignments by LET in macros."
   (mapcan (let ((state '&ordinary))
             (lambda (x)
               (if (member x lambda-list-keywords)
@@ -121,7 +124,7 @@
                     nil)
                   (case state
                     (&ordinary (etypecase x
-                                 (list (get-lambda-variables x))
+                                 (list (oam::get-lambda-variables x))
                                  (symbol (list x))))
                     ((&rest &body) (list x))
                     ((&whole &environment) (progn
@@ -154,9 +157,9 @@
 
 (defun oam::expand-list (list)
   (list* 'list* (if (listp (car list))
-                    (expand-list (car list))
+                    (oam::expand-list (car list))
                     (car list)) (when (cdr list)
-                    (list (expand-list (cdr list))))))
+                    (list (oam::expand-list (cdr list))))))
 
 #+nil
 (defmacro with-actual-macros (names &body body &environment env)
@@ -210,11 +213,20 @@
     ((or symbol string)
      (intern (reduce #'(lambda (res fn)
                          (funcall fn res))
-                     *to-keyword-hook*
+                     oam::*to-keyword-hook*
                      :initial-value (string string-designator))
              'keyword))))
 
 ;;;;* Lists
+;;;; TODO review the algorithm: it is very inefficient but should work as expected.
+(defun oam::remove-if (test sequence &rest rest &key (key #'identity) from-end start end count)
+  "Same as cl:remove-if except that this one returns as second value a sequence of same type as SEQUENCE of all removed items."
+  (let ((items-to-be-removed (apply #'cl:remove-if-not test sequence rest))
+        (resulting-sequence sequence))
+    (map nil #'(lambda (item)
+                 (setq resulting-sequence (apply #'cl:remove item resulting-sequence :count 1 rest)))
+         items-to-be-removed)
+    (values resulting-sequence items-to-be-removed)))
 
 (defun oam::insert (place list &rest values)
   "Destructively modifies the non null proper LIST by inserting values at position PLACE. If PLACE is negative the position is relative to the end of LIST, -1 being after the last element. It is unspecified and probably an error (or worse: e.g. infinite loop) if LIST is not a proper list."
@@ -244,7 +256,7 @@
   "Like cl:length but accepting circles."
   (etypecase seq
     (vector (length seq))
-    (list (nth-value 1 oam::cycle-p seq))))
+    (list (nth-value 1 (oam::cycle-p seq)))))
 (defun oam::last* (list &optional (n 1))
   "As cl:last but applicable on circles, in which case it returns (last (nth-value 2 (oam::cycle-p LIST)) n)."
   (last (nth-value 2 (oam::cycle-p LIST)) n))
@@ -252,7 +264,7 @@
 (defun oam::proper-list-p (o)
   "Return T if o is a propoer list and nil else."
   (and (listp o)
-       (not (has-cycle-p o))
+       (not (oam::has-cycle-p o))
        (null (cdr (last o)))))
 (defun oam::alistp (o &key (key-type #'symbolp))
   "Return T if o is an association list and nil else. An association list is a propoer list of CONSes whose CAR satisfy KEY-TYPE."
@@ -309,7 +321,7 @@
               (list (car x) (cadr x)))
           alist2))
 
-(let ((package (find-package #:oam)))
+(let ((package (find-package '#:oam)))
   (do-symbols (symbol package)
     (when (eq (symbol-package symbol) package)
       (export symbol package))))

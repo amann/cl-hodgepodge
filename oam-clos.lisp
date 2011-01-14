@@ -2,8 +2,10 @@
 ;;;; $Revision: 1.2 $
 
 (in-package :cl)
-(defpackage :ch.amann-wolowyk.oam-clos
-  (:nicknames #:oam-clos)
+(defpackage #:ch.amann-wolowyk.oam-clos
+  (:use)
+  (:nicknames #:oam-clos))
+(defpackage #:ch.amann-wolowyk.oam-clos-system
   (:use :cl
 	#+allegro :clos
 	#+cmu :pcl
@@ -20,14 +22,9 @@
   (:shadowing-import-from :pcl #:standard-class #:built-in-class
 			  #:find-class #:class-name #:class-of)
   #+genera
-  (:import-from :clos-internals #:validate-superclass)
-  (:export #:abstract-class
-	   #:final-class
-           #:cached-class
-           #:singleton-class
-           #:get-effective-method))
+  (:import-from :clos-internals #:validate-superclass))
 
-(in-package :ch.amann-wolowyk.oam-clos)
+(in-package #:ch.amann-wolowyk.oam-clos-system)
 (provide :ch.amann-wolowyk.oam-clos.abstract-class)
 (provide :ch.amann-wolowyk.oam-clos.final-class)
 (provide :ch.amann-wolowyk.oam-clos.cached-class)
@@ -36,41 +33,41 @@
 
 
 
-(defclass abstract-class (standard-class)
+(defclass oam-clos::abstract-class (standard-class)
   ()
   (:documentation "The class of abstract classes."))
 
-(defmethod make-instance ((c abstract-class) &rest rest)
+(defmethod make-instance ((c oam-clos::abstract-class) &rest rest)
   (declare (ignore rest))
   (error "Trying to make an instance of ~A which is an abstract class."
 	 (class-name c)))
 
-(defmethod validate-superclass ((class abstract-class) 
+(defmethod validate-superclass ((class oam-clos::abstract-class) 
 				(superclass standard-class))
   t)
 
 (defmethod validate-superclass ((class standard-class)
-				(superclass abstract-class))
+				(superclass oam-clos::abstract-class))
   t)
 
 
 
 
-(defclass final-class (standard-class)
+(defclass oam-clos::final-class (standard-class)
   ()
   (:documentation "The class of classes which may not be subclassed."))
 
-(defmethod validate-superclass ((class final-class) 
+(defmethod validate-superclass ((class oam-clos::final-class) 
 				(superclass standard-class))
   t)
 
-(defmethod validate-superclass ((class final-class #+nil standard-class)
-				(superclass final-class))
+(defmethod validate-superclass ((class oam-clos::final-class #+nil standard-class)
+				(superclass oam-clos::final-class))
   (error "Attempting to subclass a final class"))
 
 
 
-(defclass cached-class (standard-class)
+(defclass oam-clos::cached-class (standard-class)
   ((cache-fn :initform (error "No caching function given.")
              :initarg :cache-fn
              :documentation "A function with arglist (mode key &optional value) => instance.
@@ -82,28 +79,28 @@ instance --- the cached instance of the class associated to key or nil
 
 This function is a map key -> instance."))
   (:documentation "Instances of classes of this class are cached which means that if when calling make-instance the initargs satisfy a certain predicate a cached (and maybe reinitialized) instance is returned instead of a freshly created one."))
-(defmethod shared-initialize :after ((self cached-class) slot-names &rest initargs)
+(defmethod shared-initialize :after ((self oam-clos::cached-class) slot-names &rest initargs)
   (declare (ignore slot-names initargs))
   (with-slots (cache-fn) self
     (when (consp cache-fn)
       (setf cache-fn (car cache-fn)))))
 
 
-(defmethod make-instance :around ((class cached-class) &rest rest)
+(defmethod make-instance :around ((class oam-clos::cached-class) &rest rest)
   (or (let ((old-instance (funcall (slot-value class 'cache-fn) :get rest)))
         (when old-instance
           (apply #'reinitialize-instance old-instance rest)))
       (let ((new-instance (call-next-method)))
         (funcall (slot-value class 'cache-fn) :set rest new-instance))))
 
-(defmethod validate-superclass ((class cached-class)
+(defmethod validate-superclass ((class oam-clos::cached-class)
                                 (superclass standard-class))
   t)
 (defmethod validate-superclass ((class standard-class)
-                                (superclass cached-class))
+                                (superclass oam-clos::cached-class))
   t)
 
-(defclass singleton-class (cached-class)
+(defclass oam-clos::singleton-class (oam-clos::cached-class)
   ((cache-fn :initform (let (cache)
                          (lambda (mode key &optional value)
                            (declare (ignore key))
@@ -112,7 +109,7 @@ This function is a map key -> instance."))
                              (:set (setq cache value)))))))
   (:documentation "The class of classes of which exactly one instance exists and is stored in the slot single-instance."))
 
-(defmethod shared-initialize :after ((class singleton-class) slot-names
+(defmethod shared-initialize :after ((class oam-clos::singleton-class) slot-names
                                      &key instance-initargs
                                      &allow-other-keys)
   (declare (ignore slot-names))
@@ -121,11 +118,19 @@ This function is a map key -> instance."))
 
 ;;;;** Methods
 ;;;; We define here some utilities for methods.
-(defun get-effective-method (gf args)
+(defun oam-clos::get-effective-method (gf args)
   "Return the effective method of the generic function GF which is used when applying the mandatory arguments ARGS."
-  (compute-effective-method gf (generic-function-method-combination gf) (compute-applicable-methods gf args)))
+  (compute-effective-method gf (generic-function-method-combination gf)
+                            (compute-applicable-methods gf args)))
+
+;;;;** Some other utilities
+(defun oam-clos::destroy-object (object)
+  (dolist (slot (class-slots (class-of object)))
+    (slot-makunbound object (slot-definition-name slot))))
 
 
 
-
-
+(let ((package (find-package '#:oam-clos)))
+  (do-symbols (symbol package)
+    (when (eq (symbol-package symbol) package)
+      (export symbol package))))

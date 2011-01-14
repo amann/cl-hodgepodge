@@ -15,22 +15,10 @@
 ;;;; date::add-days and date::add-months.
 (in-package #:cl-user)
 (defpackage #:ch.amann-wolowyk.date
-  (:nicknames #:date)
-  (:export #:date-time
-           #:universal-time<-date-time
-           #:date-time<-universal-time
-           #:make-date-time
-           #:decode-date-time
-           #:add-seconds
-           #:add-days
-           #:add-months
-           #:last-working
-           #:holiday-p
-           #:last-working-day
-           #:first-working-day
-           #:format-date
-           #:parse-date
-           #:now))
+  (:nicknames #:date))
+(defpackage #:ch.amann-wolowyk.date-system
+  (:use))
+(in-package #:ch.amann-wolowyk.date-system)
 
 (defclass date::date-time ()
   ((date::universal-time :initform (error "No universal-time given.")
@@ -39,17 +27,17 @@
   (:documentation "Simple wrapper class for Common-Lisp universal-time.")
   (:metaclass oam-clos:cached-class)
   (:cache-fn #.(let ((cache #+(or clisp openmcl)
-                            (make-hash-table :weak :value :test #'eql)
-                            #+sbcl
-                            (make-hash-table :test #'eql :weakness :value)))
-                 #'(lambda (mode key &optional value)
-                     (let ((universal-time (nth-value 1 (get-properties key
-                                                                        '(:universal-time)))))
-                       (assert (integerp universal-time) ()
-                               "Invalid universal-time: ~S" universal-time)
-                       (ecase mode
-                         (:get (gethash universal-time cache))
-                         (:set (setf (gethash universal-time cache) value))))))))
+                          (make-hash-table :weak :value :test #'eql)
+                          #+sbcl
+                          (make-hash-table :test #'eql :weakness :value)))
+               #'(lambda (mode key &optional value)
+                   (let ((universal-time (nth-value 1 (get-properties key
+                                                                      '(:universal-time)))))
+                     (assert (integerp universal-time) ()
+                             "Invalid universal-time: ~S" universal-time)
+                     (ecase mode
+                       (:get (gethash universal-time cache))
+                       (:set (setf (gethash universal-time cache) value))))))))
 
 (defun date::date-time<-universal-time (universal-time)
   (make-instance 'date::date-time :universal-time universal-time))
@@ -276,3 +264,9 @@
   "Return a date-time object representing the current time."
   (make-instance 'date::date-time :universal-time (get-universal-time)))
 
+
+
+(let ((package (find-package '#:date)))
+  (do-symbols (symbol package)
+    (when (eq (symbol-package symbol) package)
+      (export symbol package))))
