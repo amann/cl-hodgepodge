@@ -1,54 +1,150 @@
 ;;;; -*- outline-regexp:";;;;[*]+ +" -*-
 ;;;; $Id: oam-util.lisp,v 1.2 2010/08/25 13:36:23 amao Exp $
-(in-package #:cl-user)
-(defpackage #:ch.amann-wolowyk.oam
-  (:use)
-  (:nicknames #:oam))
-(defpackage #:ch.amann-wolowyk.oam-system
-  (:use #:common-lisp))
-
 (in-package #:ch.amann-wolowyk.oam-system)
+
+
+;;;;* Generators and Iterators
+
+
 
 ;;;;* String Utilities
-(defun oam::match-string (target string)
-  "Return the position in STRING (beginnig with 0) of the first (from the left) character of the first substring of STRING matching TARGET. If there is no match, nil is returned."
-  (etypecase target
-    (cons
-     (let ((positions (mapcan #'(lambda (targ)
-                                  (multiple-value-bind (pos targ) (oam::match-string targ string)
-                                    (when pos (list (list pos targ)))))
-                              target)))
-       (apply #'values (reduce #'(lambda (&optional prev curr)
-                                   (when prev
-                                    (let* ((prev-p (first prev))
-                                           (curr-p (first curr)))
-                                      (if (< curr-p prev-p)
-                                          curr
-                                          prev))))
-                               positions))))
-    (character
-     (values (position target string) (make-string 1 :initial-element target)))
-    (string
-     (let* ((tar0 (elt target 0))
-            (n (length target)))
-       (do ((position (position tar0 string) (let ((pos (position tar0 (subseq string (1+ position)))))
-                                               (when pos (+ position pos 1)))))
-           ((or (null position)
-                (string= target (subseq string position (+ position n))))
-            (when position (values position target))))))))
 
-(defun oam::string-replace (prefix replace targets string)
-  "Return the concatenation of PREFIX and the string obtained form STRING by replacing in STRING all occurencies of TARGET by REPLACE."
-  (if (string= "" string)
-      prefix
-      (multiple-value-bind (position target)
-          (oam::match-string targets string)
-        (let* ((prefix (concatenate 'string prefix (if position (concatenate 'string (subseq string 0 position) replace) string)))
-               (string (if position (subseq string (+ position (length target))) "")))
-          (oam::string-replace prefix replace targets string)))))
+(defun oam::make-string-matcher (targets &optional escape-char from-end)
+         "Return a function taking a string and returning as primary value the position in STRING of the first character of any of targets from the beginning (from the end if FROM-END is t) in the substring of STRING delimited by START and END and which is not preceeded by a single ESCAPE-CHAR. The secondary value is the position + target-length and the third value is the target which is at that position."
+         (etypecase targets
+           (atom (make-string-matcher targets escape-char from-end))
+           (cons (let ((matchers (mapcar #'(lambda (target)
+                                             (make-string-matcher target escape-char from-end))
+                                         targets)))
+                   (eval `#'(lambda (string start end)
+                              ,(format nil "Return the position of the first match from the ~:[beginning~;end~] of ~v[~;~:;one of ~]~{~S~#[~; or ~:;, ~]~} in STRING between START and END, unless escaped with the character ~S."
+                                       from-end (length targets) targets escape-char)
+                              (values-list (reduce  ,(eval `#'(lambda (a b)
+                                                                (if a
+                                                                    (if (and b (funcall ,(if from-end #'> #'<) (car b) (car a))
+                                                                             b
+                                                                             a)
+                                                                        b))))
+                                                    ,matchers
+                                                    :key #'(lambda (m)
+                                                             (funcall m start end))))))))))
+
+
+
+(defun make-string-matcher (target &optional escape-char from-end)
+  (let* ((target-length (etypecase target
+                          (character 1)
+                          (string (length target))))
+         (no-escape-char-? (if escape-char
+                               `(or (= 0 pos)
+                                    (char/= ,escape-char (aref string (1- pos))))
+                               t))
+         (full-match-? (if (< 1 target-length)
+                           `(when (<= pos max-pos)
+                              (string= ,target (subseq string pos pos+target-length)))
+                           t)))
+    (eval `#'(lambda (string &optional (start 0) end)
+               ,(format nil "Return the position of the first match from the ~:[beginning~;end~] of ~S in STRING between START and END, unless escaped with the character ~S."
+                        from-end target escape-char)
+               (let* ,(list*
+                       `(pos ,(if from-end 'end '(1- start)))
+                       (when (< 1 target-length)
+                         `((string-length (length string))
+                           (max-pos (- string-length ,target-length)))))
+                 (loop (setq pos (position ,(etypecase target
+                                                       (character target)
+                                                       (string (aref target 0)))
+                                           string
+                                           :from-end ,from-end
+                                           :start ,(if from-end
+                                                       'start
+                                                       '(1+ pos))
+                                           :end ,(if from-end
+                                                     'pos
+                                                     'end)))
+                    (if pos
+                        (let ((pos+target-length (+ pos ,target-length)))
+                          (when (and ,no-escape-char-? ,full-match-?)
+                            (return (values pos pos+target-length ,target))))
+                        (return))))))))
+
+
+(define-condition oam::no-next-element-condition (condition)
+  ((generator :initarg :generator))
+  (:report (lambda (condition stream)
+             (format stream "There is no next element for cursor ~A."
+                     (slot-value condition 'generator))))
+  (:documentation "Condition of supertype `error' which is signaled by the cursor when no next element can be generated."))
+
+(defun oam::make-string-splitter-factory (targets &key escape-char max-chunks from-end eof-signal-p)
+  (let ((no-next-element (when eof-signal-p (make-condition 'oam::no-next-element-condition
+                                                            :generator (format nil "#<string-splitter ~S, ~S, ~S, ~S>"
+                                                                               targets escape-char max-chunks from-end))))
+        (matcher (oam::make-string-matcher targets escape-char from-end)))
+    (eval `#'(lambda ,(append `(string &optional (start 0) end
+                                       &aux (status ,(if max-chunks
+                                                         (cond
+                                                           ((< 1 max-chunks)
+                                                            :continue)
+                                                           ((= 1 max-chunks)
+                                                            :single-element)
+                                                           ((= 0 max-chunks)
+                                                            :empty))
+                                                         :continue))
+                                       (s start) (e end))
+                              (when max-chunks `((remaining-chunks ,max-chunks))))
+               (setq start 0 end nil)
+               #'(lambda ()
+                   (case status
+                     ((:continue)
+                      ,(when max-chunks `(when (= 1 (decf remaining-chunks))
+                                           (setq status :last-element)))
+                      (multiple-value-bind ,(if from-end
+                                                '(next-end start)
+                                                '(end next-start))
+                          (funcall ,matcher string s e)
+                        (prog1
+                            (subseq string start end)
+                          ,(if from-end
+                               `(if next-end
+                                    (setq end next-end
+                                          e next-end)
+                                    (setq status :empty))
+                               `(if next-start
+                                    (setq start next-start
+                                          s next-start)
+                                    (setq status :empty))))))
+                     (:last-element
+                      (setq status :empty)
+                      (subseq string ,(if from-end 0 'start) ,(when from-end 'end)))
+                     (:single-element
+                      (subseq string 0))
+                     (:empty ,(when eof-signal-p `(signal ,no-next-element)))))))))
+
+(defun oam::make-string-splitter (targets &optional escape-char max-chunks from-end)
+  (oam:fbind ((make-string-splitter (oam::make-string-splitter-factory targets
+                                                                       :escape-char escape-char
+                                                                       :max-chunks max-chunks
+                                                                       :from-end from-end :eof-signal-p nil)))
+    #'(lambda (string &optional (start 0) end)
+        (oam:fbind ((next-item (make-string-splitter string start end)))
+          (loop :for item = (next-item) :while item :collect item)))))
+
+(defun oam::split-string (targets string &key escape-char max-chunks from-end (start 0) end)
+  (funcall (oam::make-string-splitter targets escape-char max-chunks from-end) string start end))
+
+
+(defun oam::make-string-replacer (replacement targets &optional escape-char max-operations from-end)
+  (oam:fbind ((split-string (oam::make-string-splitter targets escape-char max-operations from-end)))
+    #'(lambda (string &optional (start 0) end)
+        (reduce #'(lambda (r s) (concatenate 'string r replacement s))
+                (split-string string start end)))))
+
+(defun oam::string-replace (replacement targets string &key escape-char max-operations from-end (start 0) end)
+  (funcall (oam::make-string-replacer replacement targets escape-char max-operations from-end) string start end))
 
 
-;;;;* Macros
+;;;;* Functions
 (defun oam::function-arg-list (fn)
   "return the arg list of `fn'."
   #+clisp (ext:arglist fn)
@@ -141,47 +237,8 @@
           lambda-list))
 
 ;;;;==============================================================================
-
-(defmacro oam::once-only ((&rest names) &body body)
-  (let ((gensyms (loop for n in names collect (gensym))))
-    `(let (,@(loop for g in gensyms collect `(,g (gensym))))
-       `(let (,,@(loop for g in gensyms for n in names collect ``(,,g ,,n)))
-          ,(let (,@(loop for n in names for g in gensyms collect `(,n ,g)))
-                ,@body)))))
-
-(defmacro oam::with-gensyms ((&rest names) &body body)
-  `(let (,@(mapcar #'(lambda (name)
-                      `(,name (gensym ,(string name))))
-                  names))
-     ,@body))
-
-(defun oam::expand-list (list)
-  (list* 'list* (if (listp (car list))
-                    (oam::expand-list (car list))
-                    (car list)) (when (cdr list)
-                    (list (oam::expand-list (cdr list))))))
-
-#+nil
-(defmacro with-actual-macros (names &body body &environment env)
-  (let ((gensyms (mapcar #'(lambda (name) (gensym (string name))) names)))
-    (labels
-        ((make-macro-def-code (names)
-           (mapcar #'(lambda (gensym name)
-                       `(,gensym ,(function-arg-list name)
-                                 (macroexpand
-                                  (list* ',name
-                                         ,(expand-list
-                                           (get-parameter-list
-                                            (function-arg-list name))))
-                                              ,env)))
-                   gensyms names)))
-      `(let (,@(mapcar #'list names gensyms))
-         `(macrolet (,,@(make-macro-def-code names))
-            ,,@body)))))
-
-;;;;* Functions
 (defun oam::compose-fn (fct &rest fcts)
-  "Return a function which is a composition on the primary values of the functions given as input from the left to right. (compose-fn f0 .. fn) = fn o .. o f0."
+  "Return a function which is a composition on the primary values of the functions given as input from the left to right. \(apply \(compose-fn f0 .. fn) args) == \(fn \(fn-1 .. \(apply #'f0 args) ..))."
   (if (null fcts)
       fct
       #'(lambda (&rest args)
@@ -189,8 +246,9 @@
                       (funcall fn r))
                   fcts
                   :initial-value (apply fct args)))))
+
 (defun oam::n-tuple-fn (fct &rest fcts)
-  "Take functions which are expected to have the same arglist and return a function which takes this arglist of arguments and returns as values lists of values of the individual input functions as follows: If the functions f_0 .. f_n return the values v_i_0 .. v_i_mi for each i from 0 to n, the form (apply (n-tuple-fn f_0 .. f_n) args) returns the values (v_0_0 .. v_n_0) .. (v_0_(min m0 .. mn) .. v_n_(min m0 .. mn))."
+  "Take functions which are expected to have the same arglist and return a function which takes this arglist of arguments and returns as values lists of the values of the individual input functions as follows: If the functions f_0 .. f_n return the values v_i_0 .. v_i_mi for each i from 0 to n, the form \(apply \(n-tuple-fn f_0 .. f_n) args) returns the values \(v_0_0 .. v_n_0) .. \(v_0_(min m0 .. mn) .. v_n_(min m0 .. mn))."
   (if (null fcts)
       fct
       #'(lambda (&rest args)
@@ -216,56 +274,187 @@
                      oam::*to-keyword-hook*
                      :initial-value (string string-designator))
              'keyword))))
+
+;;;;** Multi Hash-Table
+
+(let ((empty '#:nil))
+  (defun get-multi-hash (hash-table key other-keys)
+    (handler-case
+	(if other-keys
+	    (get-multi-hash (cdr (gethash key hash-table))
+                            (first other-keys) (rest other-keys))
+            (let ((hash (gethash key hash-table)))
+              (if hash
+                  (let ((value (car hash)))
+                    (if (eq empty value)
+                        (values nil nil :empty-inner-node)
+                        (values value t)))
+                  (values nil nil :empty-leaf))))
+      (type-error ()
+	(values nil nil :error))))
+  (labels ((new-hash (key hash-table hash)
+             (etypecase hash
+               ((cons t null) hash)
+               (null (let ((hash (cons empty nil)))
+                       (setf (gethash key hash-table) hash)
+                       hash)))))
+    (defun set-multi-hash (hash-table options value key other-keys)
+      (let ((hash (gethash key hash-table)))
+        (if other-keys
+            (set-multi-hash (cdr (typecase hash
+                                   ((cons t hash-table) hash)
+                                   (t (rplacd (new-hash key hash-table hash)
+                                              (apply #'make-hash-table options)))))
+                            options value (first other-keys) (rest other-keys))
+            (rplaca (typecase hash
+                      ((cons t hash-table) hash)
+                      (t (new-hash key hash-table hash)))
+                    value))))))
+(defclass oam::multi-hash-table ()
+  (getter-fn setter-fn))
+(defmethod initialize-instance :after ((self oam::multi-hash-table) &rest options
+                                       &key &allow-other-keys)
+  (let ((hash-table (apply #'make-hash-table options)))
+    (setf (slot-value self 'getter-fn) #'(lambda (key other-keys)
+                                           (get-multi-hash hash-table key other-keys))
+          (slot-value self 'setter-fn) #'(lambda (value key other-keys)
+                                           (set-multi-hash hash-table options value key other-keys)))))
+(defun oam::make-multi-hash-table (&rest options &key &allow-other-keys)
+  (apply #'make-instance 'oam::multi-hash-table options))
+
+(let* ((slot-defs (c2mop:compute-slots (find-class 'oam::multi-hash-table)))
+       (getter-fn-loc (c2mop:slot-definition-location (find 'getter-fn slot-defs :key #'c2mop:slot-definition-name)))
+       (setter-fn-loc (c2mop:slot-definition-location (find 'setter-fn slot-defs :key #'c2mop:slot-definition-name))))
+  (defun oam::get-multi-hash (hash-table key &rest other-keys)
+    (funcall (c2mop:standard-instance-access hash-table getter-fn-loc) key other-keys))
+  (defsetf oam::get-multi-hash (hash-table key &rest other-keys) (value)
+    "Set the value of the multi hash to the given value."
+    `(progn
+       (funcall (c2mop:standard-instance-access ,hash-table ,setter-fn-loc) ,value ,key ,other-keys)
+       ,value)))
+
+;;;;** Fixed Multi Hash Tables
+(defun get-fixed-multi-hash (hash-table keys)
+  (handler-case
+      (loop with foundp
+         for key in keys
+         do (multiple-value-setq (hash-table foundp)
+              (gethash key hash-table))
+         finally (return (values hash-table foundp)))
+    (type-error ()
+      (values nil nil))))
+(defun set-fixed-multi-hash (hash-table options value key other-keys)
+  (if other-keys
+      (set-fixed-multi-hash (or (gethash key hash-table)
+                                (setf (gethash key hash-table)
+                                      (apply #'make-hash-table (first options))))
+                            (rest options) value (first other-keys) (rest other-keys))
+      (setf (gethash key hash-table) value)))
+(defclass oam::fixed-range-multi-hash-table (oam::multi-hash-table) ())
+(defmethod initialize-instance :after ((self oam::fixed-range-multi-hash-table) &rest options
+                                       &key &allow-other-keys)
+  (let ((hash-table (apply #'make-hash-table (first options)))
+        (nbr-keys (length options)))
+    (setf (slot-value self 'getter-fn) #'(lambda (key other-keys)
+                                           (if (= nbr-keys (1+ (length other-keys)))
+                                               (get-fixed-multi-hash hash-table (cons key other-keys))
+                                               (error "~:[Too many~;Not enough~] keys given: ~S; expected ~D."
+                                                      (< (1+ (length other-keys)) nbr-keys) other-keys nbr-keys)))
+          (slot-value self 'setter-fn) #'(lambda (value key other-keys)
+                                           (if (= nbr-keys (1+ (length other-keys)))
+                                               (set-fixed-multi-hash hash-table (rest options) value key other-keys)
+                                               (error "~:[Too many~;Not enough~] keys given: ~S; expected ~D."
+                                                      (< (1+ (length other-keys)) nbr-keys) other-keys nbr-keys))))))
+(defun oam::make-fixed-multi-hash-table (&rest options)
+  (apply #'make-instance 'oam::fixed-range-multi-hash-table options))
+
+
+
 
-;;;;* Lists
-;;;; TODO review the algorithm: it is very inefficient but should work as expected.
-(defun oam::remove-if (test sequence &rest rest &key (key #'identity) from-end start end count)
-  "Same as cl:remove-if except that this one returns as second value a sequence of same type as SEQUENCE of all removed items."
-  (let ((items-to-be-removed (apply #'cl:remove-if-not test sequence rest))
+;;;;* Sequences and Lists
+
+;;;;** Sequences
+;;;; TODO review the algorithm: it is inefficient but should work as expected.
+(defun oam::remove-if (test sequence &rest options &key (key #'identity) from-end start end count)
+  "Same as cl:remove-if except that this one returns as second value a sequence of same type as SEQUENCE containing all removed items."
+  (declare (ignore key from-end start end count))
+  (let ((items-to-be-removed (apply #'cl:remove-if-not test sequence options))
         (resulting-sequence sequence))
     (map nil #'(lambda (item)
-                 (setq resulting-sequence (apply #'cl:remove item resulting-sequence :count 1 rest)))
+                 (setq resulting-sequence (apply #'cl:remove item resulting-sequence
+                                                 :count 1 :test #'eq :key #'identity options)))
          items-to-be-removed)
     (values resulting-sequence items-to-be-removed)))
 
-(defun oam::insert (place list &rest values)
-  "Destructively modifies the non null proper LIST by inserting values at position PLACE. If PLACE is negative the position is relative to the end of LIST, -1 being after the last element. It is unspecified and probably an error (or worse: e.g. infinite loop) if LIST is not a proper list."
-  (let* ((ll (length list))
-         (ll+1 (1+ ll))
-         (place (mod (max (min place ll) (- ll+1)) ll+1))) 
-    (if (zerop place)
-        (progn (oam::insert 1 list (car list))
-               (apply #'oam::insert 1 list (cdr values))
-               (rplaca list (car values)))
-        (setf (cdr (nthcdr (1- place) list)) (append values (nthcdr place list)))))
-  list)
+(defun oam::find-extrema (sequence predicate &key key)
+  "Return a list containing the extrema of SEQUENCE according to the preorder relation PREDICATE. An element e is extremal if for every element f in LIST: PREDICATE(f e) = NIL. If KEY is given it is applied to the elements of sequence before being applied to PREDICATE."
+  (oam::fbind (predicate (key (or key #'identity)))
+    (remove-if #'(lambda (x)
+                   (some #'(lambda (y)
+                             (predicate (key y) (key x)))
+                         sequence))
+               sequence)))
+(defun oam::insert (pos sequence &rest values)
+  "Return a fresh sequence with VALUES inserted at POS. If POS is negative the position is relative to the end of SEQUENCE, -1 being after the last element."
+  (let* ((type (let ((type (type-of #(1 2 3 4))))
+                        (typecase type
+                          (cons (car type))
+                          (symbol type))))
+         (sl (length sequence))
+         (output-type (case type
+                        (simple-vector (list type (+ sl (length values))))
+                        (t type)))
+         (sl+1 (1+ sl))
+         (pos (mod (max (min pos sl) (- sl+1)) sl+1)))
+    (concatenate output-type (subseq sequence 0 pos) values (subseq sequence pos))))
 
-(defun oam::cycle-p (list)
-  "Return T if the list LIST contains a cycle and nil else. As second value return the length of the list resp. the cycle. As third value return a fresh list containing all items of LIST before the cycle."
+
+(defun oam::ninsert (pos sequence &rest values)
+  "Return a sequence of same type as SEQUENCE with VALUES inserted at POS. NINSERT may destructively modify SEQUENCE by inserting values at position POS. If POS is negative the position is relative to the end of SEQUENCE, -1 being after the last element. It is unspecified and probably an error (or worse: e.g. infinite loop) if SEQUENCE is a unproper list."
+  (etypecase sequence
+    (cons (let* ((list sequence)
+                 (ll (length list))
+                 (ll+1 (1+ ll))
+                 (pos (mod (max (min pos ll) (- ll+1)) ll+1))) 
+            (if (zerop pos)
+                (progn (oam::ninsert 1 list (car list))
+                       (apply #'oam::ninsert 1 list (cdr values))
+                       (rplaca list (car values)))
+                (setf (cdr (nthcdr (1- pos) list)) (append values (nthcdr pos list))))
+            list))
+    (sequence (apply #'oam::insert pos sequence values))))
+
+;;;;** Lists
+;;;;*** Circles
+
+(defun oam::circle-p (list)
+  "Return T if the list LIST contains a circle and nil else. As second value return the length of the list resp. the circle. As third value return a fresh list containing all items of LIST before the circle."
   (let* ((length 0)
          proper-list
-         (cycle-p (loop with hash = (make-hash-table :test #'eq)
+         (circle-p (loop with hash = (make-hash-table :test #'eq)
                      for i on list
                      do (if (gethash i hash)
                             (return t)
                             (progn (setf (gethash i hash) T)
                                    (incf length)
                                    (push (car i) proper-list))))))
-    (values cycle-p length (nreverse proper-list))))
+    (values circle-p length (nreverse proper-list))))
 (defun oam::length* (seq)
   "Like cl:length but accepting circles."
   (etypecase seq
     (vector (length seq))
-    (list (nth-value 1 (oam::cycle-p seq)))))
+    (list (nth-value 1 (oam::circle-p seq)))))
 (defun oam::last* (list &optional (n 1))
-  "As cl:last but applicable on circles, in which case it returns (last (nth-value 2 (oam::cycle-p LIST)) n)."
-  (last (nth-value 2 (oam::cycle-p LIST)) n))
+  "As cl:last but applicable on circles, in which case it returns (last (nth-value 2 (oam::circle-p LIST)) n)."
+  (last (nth-value 2 (oam::circle-p LIST)) n))
 
 (defun oam::proper-list-p (o)
   "Return T if o is a propoer list and nil else."
   (and (listp o)
-       (not (oam::has-cycle-p o))
+       (not (oam::circle-p o))
        (null (cdr (last o)))))
+
+;;;;*** Alists and plists
 (defun oam::alistp (o &key (key-type #'symbolp))
   "Return T if o is an association list and nil else. An association list is a propoer list of CONSes whose CAR satisfy KEY-TYPE."
   (and (listp o)
@@ -321,7 +510,4 @@
               (list (car x) (cadr x)))
           alist2))
 
-(let ((package (find-package '#:oam)))
-  (do-symbols (symbol package)
-    (when (eq (symbol-package symbol) package)
-      (export symbol package))))
+(oam:export-interface '#:oam)

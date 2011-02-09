@@ -5,5 +5,5 @@
   :author "me"
   :components
   ((:file "oam-active-objects"))
-  :depends-on ("bordeaux-threads")
+  :depends-on ("bordeaux-threads" "closer-mop" "oam-util")
   :serial t)

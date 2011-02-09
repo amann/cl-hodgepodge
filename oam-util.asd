@@ -1,12 +1,9 @@
 (in-package #:cl-user)
-(defpackage #:util-system (:use #:asdf #:cl))
-(in-package #:util-system)
 
-
-
-(defsystem oam-util
+(asdf:defsystem oam-util
   :name "OAM-UTIL"
-  :author "me"
+  :author "Olivier Amann"
+  :depends-on (#:oam-base #:closer-mop)
   :components
   ((:file "oam-util"))
   :serial t)

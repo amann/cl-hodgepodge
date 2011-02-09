@@ -15,9 +15,10 @@
 ;;;; date::add-days and date::add-months.
 (in-package #:cl-user)
 (defpackage #:ch.amann-wolowyk.date
+  (:use)
   (:nicknames #:date))
 (defpackage #:ch.amann-wolowyk.date-system
-  (:use))
+  (:use #:cl))
 (in-package #:ch.amann-wolowyk.date-system)
 
 (defclass date::date-time ()
@@ -27,17 +28,17 @@
   (:documentation "Simple wrapper class for Common-Lisp universal-time.")
   (:metaclass oam-clos:cached-class)
   (:cache-fn #.(let ((cache #+(or clisp openmcl)
-                          (make-hash-table :weak :value :test #'eql)
-                          #+sbcl
-                          (make-hash-table :test #'eql :weakness :value)))
-               #'(lambda (mode key &optional value)
-                   (let ((universal-time (nth-value 1 (get-properties key
-                                                                      '(:universal-time)))))
-                     (assert (integerp universal-time) ()
-                             "Invalid universal-time: ~S" universal-time)
-                     (ecase mode
-                       (:get (gethash universal-time cache))
-                       (:set (setf (gethash universal-time cache) value))))))))
+                            (make-hash-table :weak :value :test #'eql)
+                            #+sbcl
+                            (make-hash-table :test #'eql :weakness :value)))
+                 #'(lambda (mode key &optional value)
+                     (let ((universal-time (nth-value 1 (get-properties key
+                                                                        '(:universal-time)))))
+                       (assert (integerp universal-time) ()
+                               "Invalid universal-time: ~S" universal-time)
+                       (ecase mode
+                         (:get (gethash universal-time cache))
+                         (:set (setf (gethash universal-time cache) value))))))))
 
 (defun date::date-time<-universal-time (universal-time)
   (make-instance 'date::date-time :universal-time universal-time))
@@ -258,7 +259,7 @@
                              &key time-zone)
   (destructuring-bind (y m d &optional (h 0) (mi 0) (s 0))
       (read-delimited-list #\) (make-string-input-stream (concatenate 'string (oam::string-replace "" " " '("-" ":" "T") string) ")")))
-    (date:make-date-time y m d h mi s time-zone)))
+    (date::make-date-time y m d h mi s time-zone)))
 
 (defun date::now ()
   "Return a date-time object representing the current time."

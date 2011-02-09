@@ -229,8 +229,8 @@
                                    (intern col-name package))
                                column-names)))
     (when column-names
-      (export column-names package)
-      (setf (slot-value self 'column-names) column-names))
+      (export column-names package))
+    (setf (slot-value self 'column-names) column-names)
     (let ((name (etl::name self)))
       (unless (slot-boundp self 'row-name)
         (let ((row-name (intern row-name package)))
