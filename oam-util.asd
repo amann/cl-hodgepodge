@@ -3,9 +3,8 @@
 (asdf:defsystem oam-util
   :name "OAM-UTIL"
   :author "Olivier Amann"
-  :depends-on (#:oam-base #:closer-mop)
-  :components
-  ((:file "oam-util"))
+  :depends-on (#:oam-base #:closer-mop #:bordeaux-threads)
+  :components ((:file "oam-util"))
   :serial t)
 
   

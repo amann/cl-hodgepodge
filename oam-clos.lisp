@@ -1,33 +1,12 @@
 ;;;; $Source: H:/cvsroot/common-lisp/lib/oam-clos.lisp,v $
 ;;;; $Revision: 1.2 $
 
-(in-package :cl)
-(defpackage #:ch.amann-wolowyk.oam-clos
-  (:use)
-  (:nicknames #:oam-clos))
-(defpackage #:ch.amann-wolowyk.oam-clos-system
-  (:use :cl
-	#+allegro :clos
-	#+cmu :pcl
-	#+lispworks :hcl
-	#+sbcl :sb-mop
-	#+clisp :mop
-        #+openmcl :openmcl-mop)
-  ;; CMU needs to get these things from PCL, not CL, as they are
-  ;; different because it has this weirdo wrapper stuff such that
-  ;; cl:standard-class is not pcl::standard-class & so on.  This will,
-  ;; I hope, go away at some point, but it's true for cmucl 18c
-  ;; 2000-09-07.
-  #+cmu
-  (:shadowing-import-from :pcl #:standard-class #:built-in-class
-			  #:find-class #:class-name #:class-of)
-  #+genera
-  (:import-from :clos-internals #:validate-superclass))
-
+(oam:define-project-package #:ch.amann-wolowyk.oam-clos #:oam-clos)
 (in-package #:ch.amann-wolowyk.oam-clos-system)
+
 (provide :ch.amann-wolowyk.oam-clos.abstract-class)
 (provide :ch.amann-wolowyk.oam-clos.final-class)
-(provide :ch.amann-wolowyk.oam-clos.cached-class)
+(provide :ch.amann-wolowyk.oam-clos.standard-cached-class)
 (provide :ch.amann-wolowyk.oam-clos.singleton-class)
 
 
@@ -42,11 +21,11 @@
   (error "Trying to make an instance of ~A which is an abstract class."
 	 (class-name c)))
 
-(defmethod validate-superclass ((class oam-clos::abstract-class) 
+(defmethod c2mop:validate-superclass ((class oam-clos::abstract-class) 
 				(superclass standard-class))
   t)
 
-(defmethod validate-superclass ((class standard-class)
+(defmethod c2mop:validate-superclass ((class standard-class)
 				(superclass oam-clos::abstract-class))
   t)
 
@@ -57,20 +36,24 @@
   ()
   (:documentation "The class of classes which may not be subclassed."))
 
-(defmethod validate-superclass ((class oam-clos::final-class) 
+(defmethod c2mop:validate-superclass ((class oam-clos::final-class) 
 				(superclass standard-class))
   t)
 
-(defmethod validate-superclass ((class oam-clos::final-class #+nil standard-class)
+(defmethod c2mop:validate-superclass ((class oam-clos::final-class #+nil standard-class)
 				(superclass oam-clos::final-class))
   (error "Attempting to subclass a final class"))
 
 
 
-(defclass oam-clos::cached-class (standard-class)
-  ((cache-fn :initform (error "No caching function given.")
-             :initarg :cache-fn
-             :documentation "A function with arglist (mode key &optional value) => instance.
+;;;;** Cached Class
+;;;;
+
+;;(defclass standard-cached-class-slot-definition (c2mop:slot-definition) ())
+
+(defclass oam-clos::standard-cached-class (standard-class)
+  (cache-fn)
+  (:documentation "Instances of classes of this class are cached which means that if when calling make-instance the initargs satisfy a certain predicate a cached (and maybe reinitialized) instance is returned instead of a freshly created one. The cache function is a form which evaluates to a function with arglist (mode key &optional value) and which returns the cached instance or nil.
 Arguments and values:
 mode --- ( :get | :set )
 key ---  the key; the key used is the initialization argument list as given with MAKE-INSTANCE
@@ -78,35 +61,59 @@ value --- the value, i.e. a fresh instance, to be associated with key when mode 
 instance --- the cached instance of the class associated to key or nil
 
 This function is a map key -> instance."))
-  (:documentation "Instances of classes of this class are cached which means that if when calling make-instance the initargs satisfy a certain predicate a cached (and maybe reinitialized) instance is returned instead of a freshly created one."))
-(defmethod shared-initialize :after ((self oam-clos::cached-class) slot-names &rest initargs)
-  (declare (ignore slot-names initargs))
-  (with-slots (cache-fn) self
-    (when (consp cache-fn)
-      (setf cache-fn (car cache-fn)))))
 
+(defmethod initialize-instance :after ((self oam-clos::standard-cached-class)
+                                       &key cache-fn &allow-other-keys)
+  (let* ((cache-fn (or (typecase cache-fn
+                         (null nil)
+                         (function cache-fn)
+                         (symbol (symbol-function cache-fn))
+                         (cons (let ((first-item (first cache-fn)))
+                                 (typecase first-item
+                                   (function first-item)
+                                   (symbol (symbol-function first-item))
+                                   (cons (eval first-item))))))
+                       (let ((cache (apply #'oam:make-fixed-multi-hash-table
+                                           (mapcar (lambda (s)
+                                                     (declare (ignore s))
+                                                     (append (list :test #'eql)
+                                                             #+(or clisp openmcl) '(:weak :value)
+                                                             #+sbcl '(:weakness :value)))
+                                                   (c2mop:class-slots self)))))
+                         (lambda (mode key &optional value)
+                           (case mode
+                             (:get (oam:get-multi-hash* cache key))
+                             (:set (setf (oam:get-multi-hash* cache key) value)))))))) 
+    (setf (slot-value self 'cache-fn) cache-fn)))
 
-(defmethod make-instance :around ((class oam-clos::cached-class) &rest rest)
-  (or (let ((old-instance (funcall (slot-value class 'cache-fn) :get rest)))
-        (when old-instance
-          (apply #'reinitialize-instance old-instance rest)))
-      (let ((new-instance (call-next-method)))
-        (funcall (slot-value class 'cache-fn) :set rest new-instance))))
+(oam:with-slot-definition-locations (cache-fn)
+    oam-clos::standard-cached-class
+  (let ((unbound-slot (gensym "UNBOUND-SLOT")))
+    (defmethod make-instance :around ((class oam-clos::standard-cached-class) &key &allow-other-keys)
+      (oam:fbind ((cache (c2mop:standard-instance-access class cache-fn)))
+        (or (let* ((candidate (call-next-method))
+                   (slot-values (oam:get-slot-values candidate unbound-slot)))
+              (or (cache :get slot-values)
+                  (cache :set slot-values candidate))))))))
 
-(defmethod validate-superclass ((class oam-clos::cached-class)
+(defmethod c2mop:validate-superclass ((class oam-clos::standard-cached-class)
                                 (superclass standard-class))
   t)
-(defmethod validate-superclass ((class standard-class)
-                                (superclass oam-clos::cached-class))
+(defmethod c2mop:validate-superclass ((class oam-clos::standard-cached-class)
+                                (superclass standard-object))
+  t)
+(defmethod c2mop:validate-superclass ((class standard-class)
+                                (superclass oam-clos::standard-cached-class))
   t)
 
-(defclass oam-clos::singleton-class (oam-clos::cached-class)
-  ((cache-fn :initform (let (cache)
-                         (lambda (mode key &optional value)
-                           (declare (ignore key))
-                           (ecase mode
-                             (:get cache)
-                             (:set (setq cache value)))))))
+(defclass oam-clos::singleton-class (oam-clos::standard-cached-class)
+  ()
+  (:default-initargs :cache-fn (let (cache)
+                                 #'(lambda (mode key &optional value)
+                                     (declare (ignore key))
+                                     (case mode
+                                       (:get cache)
+                                       (:set (setq cache value))))))
   (:documentation "The class of classes of which exactly one instance exists and is stored in the slot single-instance."))
 
 (defmethod shared-initialize :after ((class oam-clos::singleton-class) slot-names
@@ -120,17 +127,18 @@ This function is a map key -> instance."))
 ;;;; We define here some utilities for methods.
 (defun oam-clos::get-effective-method (gf args)
   "Return the effective method of the generic function GF which is used when applying the mandatory arguments ARGS."
-  (compute-effective-method gf (generic-function-method-combination gf)
-                            (compute-applicable-methods gf args)))
+  (c2mop:compute-effective-method
+   gf
+   (c2mop:generic-function-method-combination gf)
+   (c2mop:compute-applicable-methods-using-classes gf (mapcar #'find-class
+                                                              args))))
 
 ;;;;** Some other utilities
 (defun oam-clos::destroy-object (object)
-  (dolist (slot (class-slots (class-of object)))
-    (slot-makunbound object (slot-definition-name slot))))
+  (dolist (slot (c2mop:class-slots (class-of object)))
+    (slot-makunbound object (c2mop:slot-definition-name slot))))
 
 
+(oam:export-interface '#:oam-clos)
 
-(let ((package (find-package '#:oam-clos)))
-  (do-symbols (symbol package)
-    (when (eq (symbol-package symbol) package)
-      (export symbol package))))
+

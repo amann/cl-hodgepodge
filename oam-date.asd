@@ -5,7 +5,7 @@
   :author "me"
   :components
   ((:file "oam-date"))
-  :depends-on ("oam-util" "oam-clos")
+  :depends-on ("oam-util")
   :serial t)
 
   

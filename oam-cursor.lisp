@@ -64,15 +64,16 @@
                   `(funcall ,key (car list))
                   '(car list)))
 	 (next `(dotimes (i ,step) (pop list))))
-    (eval `(let ((list ',list))
-             #'(lambda ()
-                 ,(if test
-                      `(if ,test
-                           ,eof-signal
-                           (prog1 ,get
-                             ,next))
-                      `(prog1 ,get
-                         ,next)))))))
+    (funcall (compile nil `(lambda ()
+                             (let ((list ',list))
+                               (lambda ()
+                                 ,(if test
+                                      `(if ,test
+                                           ,eof-signal
+                                           (prog1 ,get
+                                             ,next))
+                                      `(prog1 ,get
+                                         ,next)))))))))
 
 (defun cursor::make-number-cursor (n &key to (step 1) (eof nil))
   "Return a cursor producing numbers from N below TO by steps STEP. If TO <= N and 0 < STEP or N <= TO and STEP < 0 or if TO is not a number the cursor never terminates. If STEP is not a number it is set to 1. A STEP of 0 produces an infinite sequence of the constant N (Not really useful). If N is no a number it is set to 0. If EOF is not nil it is returned when reaching the terminating condition is reached instead of throwing a `no-next-element-error'."
