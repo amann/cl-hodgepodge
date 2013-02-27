@@ -1,13 +1,16 @@
 (in-package #:cl-user)
 
-(asdf:defsystem oam-util
-  :name "OAM-UTIL"
+(asdf:defsystem awl-odbc
+  :name "AWL-ODBC"
   :author "Olivier Amann"
-  :depends-on (#:oam-base #:closer-mop #:bordeaux-threads)
+  :depends-on (#:oam-util #:cffi #:trivial-garbage #:babel)
   :components ((:module "src"
                         :serial t
                         :components
-                        ((:file "oam-util"))))
+                        ((:file "odbc-package")
+                         (:file "odbc-sql-constants")
+                         (:file "odbc-sql-functions")
+                         (:file "odbc-base"))))
   :serial t)
 
   
