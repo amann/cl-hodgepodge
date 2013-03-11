@@ -102,7 +102,7 @@
   (let* ((*gensym-counter* 0)
          (ptr<-var (when (boundp 'ptr<-var) ptr<-var))
          (body (typecase (macroexpand-1 body env)
-                 ((cons (eql foreign-let) list) body)
+                 ((cons (eql foreign-let) list) (list body))
                  (t `((macrolet ((& (var) (%get-ptr var))
                                  (cref (var idx)
                                    (multiple-value-bind (ptr ctype)
@@ -217,3 +217,4 @@
                                         (setf (,(g!val b)) ,(g!val b))))
                                    bindings))
                        ,@body)))))))))))
+

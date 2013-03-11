@@ -1,15 +1,13 @@
-;;;-*- Mode: Lisp; Package: COMMON-LISP-USER -*-
-
-;; plain-odbc, ODBC module for clisp
-;; Copyright (C) Roland Averkamp 2005
-;; Roland.Averkamp@gmx.de
-;; the license agreement can be found in file license.txt
+;;;;-*- Mode: Lisp; Package: COMMON-LISP-USER -*-
 
 (in-package :common-lisp-user)
 
 (defpackage "CH.AMANN-WOLOWYK.ODBC-SYSTEM"
   (:use "COMMON-LISP"))
 
+(defpackage "CH.AMANN-WOLOWYK.ODBC-SYSTEM-SQL-CONSTANTS"
+  (:use)
+  (:nicknames "$"))
 (defpackage "CH.AMANN-WOLOWYK.ODBC-SYSTEM-SQL"
   (:use "COMMON-LISP" "CFFI")
   (:nicknames "SQL")
@@ -18,7 +16,8 @@
 (defpackage "CH.AMANN-WOLOWYK.ODBC"
   (:use)
   (:nicknames "ODBC")
-#+ (or)  (:export
+  #+ (or)
+  (:export
    "EXEC-SQL"
    "EXEC-QUERY" 
    "EXEC-UPDATE" 
@@ -70,4 +69,5 @@
    "CONNECT-SQLITE" 
 
    "TRACE-CONNECTION"
-   "UNTRACE-CONNECTION")) 
+   "UNTRACE-CONNECTION"))
+
