@@ -28,6 +28,23 @@
   (defconstant $::SQLFLOAT     :double))
 (defconstant $::SQLINTEGER     :long)
 (defconstant $::SQLUINTEGER    :ulong)
+#-odbc2
+(defconstant $::SQLNUMERIC     :uchar)
+
+(defconstant $::SQLPOINTER     :pointer)
+
+#-odbc2
+(defconstant $::SQLREAL        :float)
+
+(defconstant $::SQLSMALLINT    :short)
+(defconstant $::SQLUSMALLINT   :ushort)
+
+#-odbc2
+(progn
+  (defconstant $::SQLTIME      :uchar)
+  (defconstant $::SQLTIMESTAMP :uchar)
+  (defconstant $::SQLVARCHAR   :uchar))
+
 #+x86-64
 (progn
   (defconstant $::SQLLEN        :int64)
@@ -46,22 +63,6 @@
   (defconstant $::SQLTRANSID    $::SQLULEN)
   (defconstant $::SQLROWOFFSET  $::SQLLEN))
 
-#-odbc2
-(defconstant $::SQLNUMERIC     :uchar)
-
-(defconstant $::SQLPOINTER     :pointer)
-
-#-odbc2
-(defconstant $::SQLREAL        :float)
-
-(defconstant $::SQLSMALLINT    :short)
-(defconstant $::SQLUSMALLINT   :ushort)
-
-#-odbc2
-(progn
-  (defconstant $::SQLTIME      :uchar)
-  (defconstant $::SQLTIMESTAMP :uchar)
-  (defconstant $::SQLVARCHAR   :uchar))
 
 ;;;;** Function return type
 (defconstant $::SQLRETURN      $::SQLSMALLINT)

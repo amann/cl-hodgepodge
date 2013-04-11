@@ -1,3 +1,9 @@
+2013-04-11    <Olivier.Amann@swisslife.ch>
+
+	* src/odbc-ffi.lisp: foreign-let and with-foreign-buffer seem to work now.
+
+	* src/odbc-base.lisp: Rewriting with-sql-function and the depending code.
+
 2013-03-11    <Olivier.Amann@swisslife.ch>
 
 	* src/odbc-sql-functions.lisp: Adapted to the changes in src/odbc-sql-constants.lisp.
