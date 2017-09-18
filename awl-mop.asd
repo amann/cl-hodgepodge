@@ -1,13 +1,11 @@
 (in-package #:cl-user)
 
-(asdf:defsystem #:awl
-  :name "AWL"
+(asdf:defsystem #:awl-mop
+  :name "AWL-MOP"
   :author "Olivier Amann <olivier.e.amann@gmail.com>"
   :depends-on (#:awl-base)
   :components
   ((:module "src"
             :components
-            ((:file "awl-sequences")
-             (:file "awl-generators")
-             (:file "awl-date"))))
+            ((:file "awl-mop"))))
   :serial t)
