@@ -1,0 +1,18 @@
+2013-04-11    <Olivier.Amann@swisslife.ch>
+
+	* src/odbc-ffi.lisp: foreign-let and with-foreign-buffer seem to work now.
+
+	* src/odbc-base.lisp: Rewriting with-sql-function and the depending code.
+
+2013-03-11    <Olivier.Amann@swisslife.ch>
+
+	* src/odbc-sql-functions.lisp: Adapted to the changes in src/odbc-sql-constants.lisp.
+
+	* src/odbc-package.lisp: Added definition of the package "CH.AMANN-WOLOWYK.ODBC-SYSTEM-SQL-CONSTANTS" nicknamed "$" and containing SQL-constants.
+
+	* src/odbc-sql-constants.lisp: Constants are external symbols of the package "CH.AMANN-WOLOWYK.ODBC-SYSTEM-SQL-CONSTANTS".
+
+	* src/odbc-base.lisp: Defined Buffer objects as wrapper around a cffi:pointer on a foreign buffer. Columns and Parameters will contain such a buffer.
+
+	* awl-odbc.asd (#:cl-user): Added files "odbc-ffi" and "odbc-sql-type-aliases" to the system.
+
