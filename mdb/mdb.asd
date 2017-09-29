@@ -1,8 +1,11 @@
-(defsystem "mdb"
-  :description "Market Data Base"
-  :version "0.1"
-  :author "Olivier Amann <olivier.amann@swisslife.ch>"
-  :components ((:module "mdb"
-                :serial t
-                :components ((:file "package")
-                             (:file "in-memory-db")))))
+(in-package #:cl-user)
+
+(asdf:defsystem mdb
+  :name "MDB"
+  :author "Olivier Amann"
+  :depends-on ("oam-db" "usocket" )
+  :components ((:file "mdb")
+               (:file "oam-server"))
+  :serial t)
+
+  
