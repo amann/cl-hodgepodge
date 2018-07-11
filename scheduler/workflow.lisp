@@ -1,5 +1,5 @@
 ;;;; -*- outline-regexp:";;;;[*]+ +" -*-
-
+(in-package "CL-USER")
 ;;;;* Hook
 (defclass hook ()
   ((lambda-list :initarg :lambda-list)
@@ -144,115 +144,236 @@ which act on a freshly instanciated queue which is synchronized if the key argum
 
 ;;;;* Workflow
 
-(defpackage "MCT"
+(in-package "CL-USER")
+
+(defpackage "DISPATCHER"
+  (:use "CL")
+  (:export "SEND-JOB"))
+(defun send-job (jobdef))
+(defun make-jobdef (sender time)
+  `(*top* (@)
+          (|Job| (@(|Sender| ,sender)
+                   (|SendTime| ,time))
+                 (|Starter|)
+                 ())))
+
+
+(defpackage "GRAL"
+  (:use "CL")
   (:export "WAIT-DELIVERY"
            "LAST-DELIVERY"
            "STD-PORTFOLIO"
-           "CALCULATE"))
+           "RELOAD-RPF"))
+(in-package "GRAL")
 
-(defun mct:wait-delivery (market-unit situation-date delivery-type &optional superceeding)
+(defvar *databases* '(:uat ("CRRISK" "crrisk_uat_user" "CM_plc2$1uat" "IX-SQL0181")
+                      :pav ("CRRISK" "crrisk_pav_user" "C0M_plcr$P17" "IX-SQL0306")))
+(defvar *stage* :uat)
+
+(defmacro with-db (&body body)
+  `(destructuring-bind (database user password host)
+       (getf *databases* *stage*)
+     (mssql:with-connection (database user password host)
+       ,@body)))
+(defun query (format query &rest args)
+  (with-db
+    (mssql:query (apply 'format nil query args) :format format)))
+(sb-int:defconstant-eqx +market-units+ '(:ch :de :fr :lu :slgroup) #'equalp)
+(deftype market-unit ()
+  `(member ,@+market-units+))
+(defun gral:wait-delivery (market-unit situation-date delivery-type &optional superceeding)
   "Wait until a delivery for MARKET-UNIT and SITUATION-DATE of type DELIVERY-TYPE is present in
- the MCT data base. If SUPERCEEDING is a delivery ID, wait for a delivery which is more recent."
-  nil)
-(defun mct:last-delivery (market-unit situation-date delivery-type)
+ the MCT data base and return its last delivery ID. If SUPERCEEDING is a delivery ID, wait for a
+ delivery which is more recent."
+  (let ((superceeding (or superceeding -1)))
+    (do ((delivery (last-delivery market-unit situation-date delivery-type)
+                   (last-delivery market-unit situation-date delivery-type)))
+        ((and delivery (< superceeding delivery)) delivery)
+      (sleep 30))))
+(defun gral:last-delivery (market-unit situation-date delivery-type)
   "Return the delivery ID of the last delivery present in the MCT data base."
-  nil)
+  (destructuring-bind (database user password host)
+      (getf gral::*databases* *stage*)
+    (mssql:with-connection (database user password host)
+      (mssql:query (format nil "select max(delivery) from t_activedeliverys
+ where situationdate = '~A'
+ and orgunit = '~A'
+ and deliverytype = '~A'" situation-date market-unit delivery-type) :format :single))))
 
-(defun mct:std-portfolio (market-unit situation-date &key :asset-delivery :rpf-delivery)
+(defclass gral:std-portfolio ()
+  ((market-unit :market-unit)
+   (situation-date :situation-date)
+   (asset-delivery :asset-delivery)
+   (rpf-delivery :rpf-delivery)))
+(defgeneric get-where-clause (portfolio report-type)
+  (:method ((portfolio std-portfolio) report-type)
+    nil)
+  (:method :around ((portfolio std-portfolio) report-type)
+    (with-slots (situation-date market-unit asset-delivery rpf-delivery)
+        portfolio
+      (format nil "SITUATIONDATE = '~A' AND ORGUNIT = '~A' AND DELIVERY IN (~{~S~^,~S~})~@[ AND ~A~]"
+              situation-date market-unit (remove nil (list asset-delivery rpf-delivery)) (call-next-method)))))
+(defun gral:std-portfolio (market-unit situation-date &key asset-delivery rpf-delivery)
   "Return a standard portfolio definition found in the MCT data base for MARKET-UNIT at SITUATION-DATE and for the ASSET-DELIVERY and RPF-DELIVERY IDs. At least one of the ASSET-DELIVERY or RPF-DELIVERY must been indicated."
-  nil)
+  (assert (or asset-delivery rpf-delivery))
+  (make-instance 'std-portfolio :market-unit market-unit :situation-date situation-date
+                                :asset-delivery asset-delivery :rpf-delivery rpf-delivery))
+(defun gral:get-delivery (delivery-type portfolio)
+  "Return the delivery ID of DELIVERY-TYPE of the PORTFOLIO."
+  (ecase delivery-type
+   (:asset (slot-value portfolio 'asset-delivery))
+   (:rpf (slot-value portfolio 'rpf-delivery))))
 
+
+(defpackage "MCT"
+  (:use "CL" "CL-USER")
+  (:export "CALCULATE"))
+(in-package "MCT")
+(defclass configuration ()
+  ((situation-date :initarg :situation-date)
+   (calibration :initarg :call)
+   (ics-configuration) calculator))
+(defclass target-capital-configuration (configuration)
+  ())
+(defclass sensitivity-configuration (configuration)
+  ())
+(defclass vsc-configuration (configuration)
+  ())
 (defun mct:calculate (configuration portfolio &optional (base-date (situation-date portfolio)))
   "Do a calculation on PORTFOLIO using CONFIGURATION."
   nil)
 
-
-
+(in-package "CL-USER")
 (defpackage "CRT"
+  (:use "CL" "CL-USER")
   (:export "CALCULATE"))
+(in-package "CRT")
 (defun crt:calculate (configuration portfolio &optional (base-date (situation-date portfolio)))
   "Do a calculation on PORTFOLIO using CONFIGURATION."
   nil)
 
+(in-package "CL-USER")
 (defpackage "AGT"
+  (:use "CL" "CL-USER")
   (:export "CALCULATE"
            "GET-PARAMETERS"))
+(in-package "AGT")
 (defun agt:calculate (configuration parameters market-risk credit-risk)
   "Do a calculation on PARAMETERS MARKET-RISK and CREDIT-RISK using CONFIGURATION."
   nil)
 (defun agt:get-parameters (configuration market-unit situation-date)
-  "Return the parameters for MARKET-UNIT and SITUATION-DATE needed for a calculation under CONFIGURATION.")
+  "Return the parameters for MARKET-UNIT and SITUATION-DATE needed for a calculation under CONFIGURATION."
+  nil)
 
-
+(in-package "CL-USER")
 (defpackage "RDB"
+  (:use "CL" "CL-USER")
   (:export "*PURPOSE*"
-           "LOAD"
-           "PRINT-REPORT"))
-(defvar rdb:*purpose* nil)
-(defun rdb:load (object purpose)
+           "LOAD-OBJECT"
+           "PRINT-REPORT"
+           "FIND-CONFIG"))
+(in-package "RDB")
+(defvar *purpose* :frm)
+(defvar *configurations* '(:sst (:mct (:sensitivities (make-instance 'mct::sensitivity-configuration)
+                                       :target-capital (make-instance 'mct::target-capital-configuration)
+                                       :vsc (make-instance 'mct::vsc-configuration))
+                                 :crt (:target-capital (make-instance 'crt::target-capital-configuration))
+                                 :agt (:aggregation nil))
+                           :frm (:mct (:sensitivities (make-instance 'mct::sensitivity-configuration)
+                                       :target-capital (make-instance 'mct::target-capital-configuration)
+                                       :vsc (make-instance 'mct::vsc-configuration))
+                                 :crt (:target-capital (make-instance 'crt::target-capital-configuration))
+                                 :agt (:aggregation nil))
+                           :grc (:mct (:sensitivities (make-instance 'mct::sensitivity-configuration)
+                                       :target-capital (make-instance 'mct::target-capital-configuration)
+                                       :vsc (make-instance 'mct::vsc-configuration))
+                                 :crt (:target-capital (make-instance 'crt::target-capital-configuration))
+                                 :agt (:aggregation nil))))
+(defun rdb:find-config (tool calculation purpose)
+  (or (getf (getf (getf *configurations* purpose) tool) calculation)
+      (error "Configuration for purpose=~A, tool=~A and calculation=~A not found."
+             purpose tool calculation)))
+(defgeneric rdb:load-object (object purpose)
   "Load OBJECT into the risk data base under the label PURPOSE."
   nil)
 (defun rdb:print-report (market-unit situation-date purpose)
   "Print a report for MARKET-UNIT und SITUATION-DATE under PURPOSE."
   nil)
 
+
+(in-package "CL-USER")
 (defpackage "MANUAL"
+  (:use "CL" "CL-USER")
   (:export "IS-OK"
            "SELECT"))
+(in-package "MANUAL")
 (defun manual:is-ok ()
   "Wait for an external (manual) interaction to return true or false."
-  nil)
+  (yes-or-no-p "Is everything OK?"))
 (defun manual:select (items)
   "Wait for an external (manual) interaction to return an item chosen amongst ITEMS. It is possible to return NIL if none has been chosen."
-  nil)
+  (let ((i -1))
+    (format t "Please chose one among following possibilities by typing-in the corresponding number:~
+~:{~&~3D - ~A~}"
+            (mapcar (lambda (item) (list (incf i) item))
+                    items))
+    (loop
+      (with-simple-restart
+          (redo-choice "Redo coice.")
+        (format t "~&Your choice: ")
+        (let ((choice (read)))
+          (unless (typep choice `(or null (integer 0 ,i)))
+            (error "The value ~S is not a valid choice. Enter a number from 0 to ~D or NIL." choice i))
+          (return (when choice (elt items choice))))))))
 
 
+(in-package "CL-USER")
 (defun rdb:make-report (purpose market-unit situation-date)
   (labels
       ((sign-off-assets (&optional asset-delivery)
-         (mct:wait-delivery market-unit situation-date :assets asset-delivery)
-         (let* ((asset-delivery (mct:last-delivery market-unit situation-date :assets))
-                (portfolio (mct:std-portfolio market-unit situation-date asset-delivery)))
+         (let* ((asset-delivery (gral:wait-delivery market-unit situation-date :assets asset-delivery))
+                (portfolio (gral:std-portfolio market-unit situation-date asset-delivery)))
            (rdb:load (mct:calculate (rdb:find-config :mct :sensitivities purpose) portfolio) purpose)
            (rdb:load portfolio purpose)
            (rdb:print-report market-unit situation-date purpose)
            (if (manual:is-ok)
                (labels
                    ((calculate-target-capital (&optional rpf-delivery)
-                      (mct:wait-delivery market-unit situation-date :rpf rpf-delivery)
-                      (let ((portfolio (mct:std-portfolio market-unit situation-date
-                                                          :asset-delivery asset-delivery
-                                                          :rpf-delivery (mct:last-delivery market-unit
-                                                                                           situation-date
-                                                                                           :rpf)))
-                            (agt-config (rdb:find-config :agt :aggregation purpose)))
-                        (let* ((agt-results (multiple-value-call
-                                               'agt:calculate
-                                             agt-config
-                                             (do-parallel
-                                               (agt:get-parameters agt-config market-unit situation-date)
-                                               (mct:calculate (rdb:find-config :mct :simulation purpose) portfolio)
-                                               (crt:calculate (rdb:find-config :crt :simulation purpose) portfolio))))
-                               (chosen-rpf (get-rpf-delivery (agt:portfolio (manual:select agt-results))))
-                               (chosen-agt-result (agt:extract-sub-result agt-result chosen-rpf)))
-                          (if chosen-rpf
-                              (do-parallel
-                                (rdb:load agt-result purpose)
-                                (progn
-                                  (gral:reload-rpf chosen-rpf)
-                                  (let ((rpf-delivery (mct:last-delivery market-unit situation-date :rpf)))
-                                    (do-parallel
-                                      (rdb:load (mct:std-portfolio market-unit situation-date
-                                                                   :rpf-delivery rpf-delivery)
-                                                purpose)
-                                      (rdb:load (mct:calculate (rdb:find-config :mct :vsc purpose)
-                                                               (mct:std-portfolio market-unit situation-date
-                                                                                  :asset-delivery asset-delivery
-                                                                                  :rpf-delivery rpf-delivery))
-                                                purpose)))))
+                      (gral:wait-delivery market-unit situation-date :rpf rpf-delivery)
+                      (let* ((portfolio (gral:std-portfolio market-unit situation-date
+                                                           :asset-delivery asset-delivery
+                                                           :rpf-delivery (gral:last-delivery market-unit
+                                                                                             situation-date
+                                                                                             :rpf)))
+                             (agt-config (rdb:find-config :agt :aggregation purpose))
+                             (agt-results (multiple-value-call
+                                              'agt:calculate
+                                            agt-config
+                                            (do-parallel
+                                              (agt:get-parameters agt-config market-unit situation-date)
+                                              (mct:calculate (rdb:find-config :mct :target-capital purpose)
+                                                             portfolio)
+                                              (crt:calculate (rdb:find-config :crt :target-capital purpose)
+                                                             portfolio)))))
+                        (chosen-rpf (gral:get-delivery :rpf (agt:portfolio (manual:select agt-results))))
+                        (chosen-agt-result (agt:extract-sub-result agt-result chosen-rpf))
+                        (if chosen-rpf
+                            (do-parallel
+                              (rdb:load agt-result purpose)
                               (progn
-                                (mct:wait-delivery market-unit situation-date :rpf rpf-delivery)
-                                (calculate-target-capital (mct:last-delivery market-unit situation-date :rpf))))))))
+                                (gral:reload-rpf chosen-rpf)
+                                (let ((rpf-delivery (gral:last-delivery market-unit situation-date :rpf)))
+                                  (do-parallel
+                                    (rdb:load (gral:std-portfolio market-unit situation-date
+                                                                  :rpf-delivery rpf-delivery)
+                                              purpose)
+                                    (rdb:load (mct:calculate (rdb:find-config :mct :vsc purpose)
+                                                             (gral:std-portfolio market-unit situation-date
+                                                                                 :asset-delivery asset-delivery
+                                                                                 :rpf-delivery rpf-delivery))
+                                              purpose)))))
+                            (calculate-target-capital (gral:wait-delivery market-unit situation-date
+                                                                          :rpf rpf-delivery))))))
                  (calculate-target-capital))
                (sign-off-assets asset-delivery)))))
     (sign-off-assets)))
