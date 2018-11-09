@@ -29,7 +29,7 @@
       (sb-ext:get-time-of-day)
     (declare (type (unsigned-byte 32) seconds)
              (type fixnum microseconds))
-    (values (+ seconds +unix-epoch+) (/ microseconds 1000)))
+    (values (+ seconds +unix-epoch+) (/ microseconds 1000000)))
   #+cmu
   (multiple-value-bind (successp seconds microseconds) (unix:unix-gettimeofday)
     (declare (type (unsigned-byte 32) seconds)
@@ -278,8 +278,9 @@
       (list b)))
 
 (defun reduce-interval-expression (expr)
-  (reduce #'l-merge (rest expr)
-          :initial-value (list (first expr))))
+  (when expr
+    (reduce #'l-merge (rest expr)
+            :initial-value (list (first expr)))))
 
 (defun merge-interval-expressions (expr1 expr2)
   (reduce-interval-expression (append expr1 expr2)))
@@ -361,6 +362,16 @@
   ((interval-expr :reader interval-expr)))
 (defmethod initialize-instance :after ((self awl::relative-interval) &key interval-expr &allow-other-keys)
   (setf (slot-value self 'interval-expr) (reduce-interval-expression interval-expr)))
+(defmethod print-object ((object awl::relative-interval) stream)
+  (print-unreadable-object (object stream)
+    (awl::print-interval object stream)))
+
+(defgeneric awl::scale (factor vector &key &allow-other-keys))
+(defmethod awl::scale ((factor integer) (vector awl::relative-interval) &key)
+  (make-instance 'awl::relative-interval
+                 :interval-expr (mapcar (awl::dlambda ((unit . mult))
+                                          (cons unit (* factor mult)))
+                                        (interval-expr vector))))
 
 (defgeneric awl::translate (point vector &key &allow-other-keys))
 (defmethod awl::translate ((point awl::date-time) (vector awl::relative-interval)
@@ -386,63 +397,95 @@
                ("Y" awl::month 12)
                ("BD" awl::business-day 1))))
   (flet ((get-unit (unit)
-           (cdr (assoc unit units :test #'string=))))
-   (awl::fbind ((parse-unit (awl::make-string-matcher (mapcar #'car units))))
-     (defun parse-rel-interval (string)
-       (let ((string (string-upcase string))
-             (length (length string)))
-         (do ((start 0)
-              (expr nil))
-             ((<= length start) (reduce-interval-expression (nreverse expr)))
-           (multiple-value-bind (nbr pos)
-               (handler-case
-                   (parse-integer string :junk-allowed t :start start)
-                 (parse-error ()
-                   (values 1 start)))
-             (multiple-value-bind (pos1 end unit)
-                 (parse-unit string pos)
-               (declare (ignore pos1))
-               (setq start end)
-               (destructuring-bind (unit mult)
-                   (get-unit unit)
-                 (push (cons unit (* mult (or nbr 1))) expr))))))))))
+           (cdr (assoc unit units :test #'string=)))
+         (div (elem-unit)
+           (destructuring-bind (unit . mult)
+               elem-unit
+             (let* ((signum (signum mult))
+                    (mult (* signum mult)))
+               (let ((unit (find unit units :from-end t
+                                            :test (lambda (unit name-unit-mult)
+                                                    (and (eql unit (second name-unit-mult))
+                                                         (<= (third name-unit-mult) mult))))))
+                 (multiple-value-bind (mult rest)
+                     (floor mult (third unit))
+                   (values (format nil "~:[~;-~]~[~;~:;~:*~D~]~A" (< signum 0) mult (first unit))
+                           (unless (zerop rest)
+                             (cons (second unit) (* signum rest))))))))))
+    (awl::fbind ((parse-unit (awl::make-string-matcher (mapcar #'car units))))
+      (defun parse-rel-interval (string)
+        (let ((string (string-upcase string))
+              (length (length string)))
+          (do ((start 0)
+               (expr nil))
+              ((<= length start) (reduce-interval-expression (nreverse expr)))
+            (multiple-value-bind (nbr pos)
+                (handler-case
+                    (parse-integer string :junk-allowed t :start start)
+                  (parse-error ()
+                    (values 1 start)))
+              (multiple-value-bind (pos1 end unit)
+                  (parse-unit string pos)
+                (declare (ignore pos1))
+                (unless unit
+                  (error "Invalid relative interval string ~S." (subseq string pos)))
+                (setq start end)
+                (destructuring-bind (unit mult)
+                    (get-unit unit)
+                  (unless (and nbr (zerop nbr))
+                    (push (cons unit (* mult (or nbr 1))) expr))))))))
+      (defun print-rel-interval (interval-expression stream)
+        (when interval-expression
+          (destructuring-bind (elem-unit &rest interval-expression)
+              interval-expression
+            (multiple-value-bind (div rest)
+                (div elem-unit)
+              (princ div stream)
+              (print-rel-interval (if rest
+                                      (cons rest interval-expression)
+                                      interval-expression)
+                                  stream))))))))
 
 (defun awl::parse-interval (string)
   (make-instance 'awl::relative-interval :interval-expr (parse-rel-interval string)))
-
+(defun awl::print-interval (interval stream)
+  (let ((interval-expression (interval-expr interval)))
+    (if interval-expression
+        (print-rel-interval interval-expression stream)
+        (princ "0d" stream))))
 
 ;;;;*** Format Date
 ;;;; Generic function to format the date into standardized formats.
 (defgeneric awl::format-date (date-time format &key time-zone stream
-                                         &allow-other-keys)
+                                                 &allow-other-keys)
   (:documentation "Send DATE-TIME in the format specified by FORMAT to the stream STREAM and return nil if STREAM is non nil. The default value of STREAM is nil, in which case FORMAT-DATE returns the formatted date as a string."))
 
 (defmethod awl::format-date ((date-time awl::date-time)
-                              (format (eql :iso8601))
-                              &key full time-zone stream)
+                             (format (eql :iso8601))
+                             &key full time-zone stream)
   (declare (ignore format))
   (multiple-value-bind (seconds minutes hours date month year day daylight-p zone)
       (awl::decode-date-time date-time time-zone)
     (declare (ignore day))
     (format stream "~4D-~2,'0D-~2,'0D~:[~;T~{~2,'0D:~}~6,3,0,,'0F~{~2,'0@D:~2,'0D~}~:[~;S~]~]"
             year month date full (list hours minutes) seconds (multiple-value-bind (h m) (truncate (- zone))
-                                                             (list h (abs (truncate (* m 60)))))
+                                                                (list h (abs (truncate (* m 60)))))
             (and daylight-p (not (zerop daylight-p))))))
 (defmethod awl::format-date ((date-time awl::date-time)
-                              (format (eql :yymm))
-                              &key time-zone stream)
+                             (format (eql :yymm))
+                             &key time-zone stream)
   (declare (ignore format))
   (format stream "~2,'0D~2,'0D" (awl::get-year date-time time-zone) (awl::get-month date-time time-zone)))
 (defmethod awl::format-date ((date-time awl::date-time)
-                              (format (eql :MonYY))
-                              &key time-zone stream)
+                             (format (eql :MonYY))
+                             &key time-zone stream)
   (declare (ignore format))
   (format stream "~[~;Jan~;Feb~;Mar~;Apr~;May~;Jun~;Jul~;Aug~;Sep~;Oct~;Nov~;Dec~]~2,'0D"
           (awl::get-month date-time time-zone)
           (mod (awl::get-year date-time time-zone) 100)))
 (defmethod awl::format-date ((date-time awl::date-time)
-                              (format (eql :|ddMonyyyy|))
-                              &key time-zone stream)
+                             (format (eql :|ddMonyyyy|))
+                             &key time-zone stream)
   (declare (ignore format))
   (format stream "~2,'0D~[~;Jan~;Feb~;Mar~;Apr~;May~;Jun~;Jul~;Aug~;Sep~;Oct~;Nov~;Dec~]~4,'0D"
           (awl::get-date date-time time-zone) (awl::get-month date-time time-zone)
@@ -453,19 +496,19 @@
 ;;;; that awl::parse-date be an inverse function of the function awl::format-date
 ;;;; when using the same FORMAT specifier and :stream is nil.
 (defgeneric awl::parse-date (string format &key time-zone
-                                     &allow-other-keys)
+                                             &allow-other-keys)
   (:documentation "Parse STRING to return a date-time instance corresponding to the date contained in STRING in the format as if it would have been written by awl::format-date using the format FORMAT. An error of type date-parse-error is thrown if parsing fails."))
 (defmethod awl::parse-date ((string awl::date-time) format &key &allow-other-keys)
   "In some cases it might be useful to put a date-time object into the parser."
   string)
 (defmethod awl::parse-date ((string string) (format (eql :iso8601))
-                             &key time-zone &allow-other-keys)
+                            &key time-zone &allow-other-keys)
   "Try to parse a date written in the ISO8601 format."
   (destructuring-bind (y m d &optional (h 0) (mi 0) (s 0))
       (read-delimited-list #\) (make-string-input-stream (concatenate 'string (awl::string-replace " " '("-" ":" "T") string) ")")))
     (awl::date-time y m d h mi s time-zone)))
 (defmethod awl::parse-date ((string string) (format (eql :yymm))
-                             &key &allow-other-keys)
+                            &key &allow-other-keys)
   (awl::date-time (+ 2000 (parse-integer string :start 0 :end 2)) (parse-integer string :start 2 :end 4)))
 (defun awl::now ()
   "Return a date-time object representing the current time."
@@ -480,7 +523,7 @@
   "Return T if A and all remaing date in REST form a strictly increasing sequence and NIL else."
   (every (lambda (b)
            (prog1 (awl::date-time-< a b)
-            (setq a b)))
+             (setq a b)))
          rest))
 (defun awl::time-<= (a &rest rest)
   "Return T if A and all remaing date in REST form an increasing sequence and NIL else."
