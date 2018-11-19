@@ -173,8 +173,10 @@
            (daylight-offset (- (or (nth-value 1 (time-zone-offset time-zone univ-time+n-days)) 0d0)
                                (or (nth-value 1 (time-zone-offset time-zone univ-time)) 0d0))))
       (awl::date-time<-universal-time (+ univ-time+n-days daylight-offset))))
-  (defun awl::nbr-days-between (a b)
-    (floor (awl::nbr-secs-between a b)
+  (defun awl::nbr-days-between (a b &optional time-zone)
+    (floor (+ (awl::nbr-secs-between a b)
+              (- (or (nth-value 1 (time-zone-offset time-zone a)) 0d0)
+                 (or (nth-value 1 (time-zone-offset time-zone b)) 0d0)))
            +number-of-seconds-per-day+)))
 
 ;;;;*** Add Months
