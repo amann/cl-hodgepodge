@@ -371,10 +371,13 @@
 
 (defgeneric awl::scale (factor vector &key &allow-other-keys))
 (defmethod awl::scale ((factor integer) (vector awl::relative-interval) &key)
-  (make-instance 'awl::relative-interval
-                 :interval-expr (mapcar (awl::dlambda ((unit . mult))
-                                          (cons unit (* factor mult)))
-                                        (interval-expr vector))))
+  (let ((interval-expr (mapcar (awl::dlambda ((unit . mult))
+                                 (cons unit (* factor mult)))
+                               (interval-expr vector))))
+    (make-instance 'awl::relative-interval
+                   :interval-expr (if (< factor 0)
+                                      (nreverse interval-expr)
+                                      interval-expr))))
 
 (defgeneric awl::translate (point vector &key &allow-other-keys))
 (defmethod awl::translate ((point awl::date-time) (vector awl::relative-interval)
