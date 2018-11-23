@@ -156,8 +156,9 @@
      (date-time.universal-time b)))
 
 ;;;;*** Add seconds
-(defun awl::add-seconds (date-time nbr-sec)
+(defun awl::add-seconds (date-time nbr-sec &optional time-zone)
   "Return a new instance of date-time representing DATE-TIME shifted by NBR-SEC of seconds."
+  (declare (ignore time-zone))
   (awl::date-time<-universal-time
    (+ (date-time.universal-time date-time)
       nbr-sec)))
