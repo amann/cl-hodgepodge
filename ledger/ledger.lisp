@@ -74,10 +74,12 @@
   anchor from step to bdc)
 
 (defun cycle (from step to &key (anchor from) bdc)
-  (make-cycle :anchor anchor  :step step
-              :from (first-after from anchor step)
-              :to (last-before to anchor step)
-              :bdc bdc))
+  (with-dates (from to)
+    (with-intervals (step)
+      (make-cycle :anchor anchor  :step step
+                  :from (first-after from anchor step)
+                  :to (last-before to anchor step)
+                  :bdc bdc))))
 (defgeneric forwardp (cycle)
   (:method ((cycle cycle))
     (not (beforep (cycle-to cycle) (cycle-from cycle)))))
@@ -113,23 +115,37 @@
   `(do () ((not ,test) ,result)
      ,@body))
 
+(defmacro with-dates ((&rest dates) &body body)
+  `(let ,(mapcar (lambda (date)
+                   `(,date (to-date-time ,date)))
+                 dates)
+     ,@body))
+(defmacro with-intervals ((&rest intervals) &body body)
+  `(let ,(mapcar (lambda (interval)
+                   `(,interval (to-interval ,interval)))
+                 intervals)
+     ,@body))
 
-(defun first-after (date anchor step &aux (date (to-date-time date)))
-  (multiple-value-bind (quotient rest-days)
-      (date-floor date anchor step)
-    (let ((candidate (awl:translate anchor (awl:scale quotient step))))
-      (if (awl:time-< candidate date)
-          (let ((quotient (+ quotient (signum rest-days))))
-            (values (awl:translate anchor (awl:scale quotient step)) quotient))
-          (values candidate quotient)))))
+(defun first-after (date anchor step)
+  (with-dates (date anchor)
+    (with-intervals (step)
+      (multiple-value-bind (quotient rest-days)
+          (date-floor date anchor step)
+        (let ((candidate (awl:translate anchor (awl:scale quotient step))))
+          (if (awl:time-< candidate date)
+              (let ((quotient (+ quotient (signum rest-days))))
+                (values (awl:translate anchor (awl:scale quotient step)) quotient))
+              (values candidate quotient)))))))
 (defun last-before (date anchor step)
-  (multiple-value-bind (quotient rest-days)
-      (date-floor date anchor step)
-    (let ((candidate (awl:translate anchor (awl:scale quotient step))))
-      (if (awl:time-< date candidate)
-          (let ((quotient (- quotient (signum rest-days))))
-            (values (awl:translate anchor (awl:scale quotient step)) quotient))
-          (values candidate quotient)))))
+  (with-dates (date anchor)
+    (with-intervals (step)
+      (multiple-value-bind (quotient rest-days)
+          (date-floor date anchor step)
+        (let ((candidate (awl:translate anchor (awl:scale quotient step))))
+          (if (awl:time-< date candidate)
+              (let ((quotient (- quotient (signum rest-days))))
+                (values (awl:translate anchor (awl:scale quotient step)) quotient))
+              (values candidate quotient)))))))
 
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
@@ -158,14 +174,15 @@
 
 
 (defun add-businessdays (date nbr &optional time-zone (holidays :sat-sun))
-  (if (zerop nbr)
-      date
-      (let* ((shift (signum nbr))
-             (next-day (awl:add-days date shift time-zone)))
-        (add-businessdays next-day (if (awl:holiday-p holidays next-day time-zone)
-                                       nbr
-                                       (- nbr shift))
-                          time-zone))))
+  (with-dates (date)
+    (if (zerop nbr)
+        date
+        (let* ((shift (signum nbr))
+               (next-day (awl:add-days date shift time-zone)))
+          (add-businessdays next-day (if (awl:holiday-p holidays next-day time-zone)
+                                         nbr
+                                         (- nbr shift))
+                            time-zone)))))
 (defstruct payment
   date amount from to) 
 
