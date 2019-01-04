@@ -44,9 +44,9 @@
 ;;;;                 |                          U    |
 ;;;;                 U    AWL:STANDARD-PROPERTY-SET  U
 ;;;;                 |              U                |
-;;;; #<p-struct> € p-struct   €   p-set   €   AWL:PROPERTY-SET
+;;;; #<p-struct> ∈ p-struct   ∈   p-set   ∈   AWL:PROPERTY-SET
 ;;;;
-;;;; where € signifies "is instance of" and U signifies "is subtype of".
+;;;; where ∈ signifies "is instance of" and U signifies "is subtype of".
 
 ;;;;** Property Structure Objects
 ;;;;

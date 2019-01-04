@@ -113,7 +113,7 @@
     (:cauchy-complete (cauchy-complete type))))
 
 (defvar awl::*enumeration-format-string*
-  "~{~#[ none~; ~S~; ~S and ~S ~:;~@{~#[~; and~] ~S~^,~}~]~}")
+  "~{~#[ none~; ~S~; ~S and ~S~:;~@{~#[~; and~] ~S~^,~}~]~}")
 
 (defun resulting-type* (domain types)
   (dispatch-type (dolist (elt-type *addition-groups*

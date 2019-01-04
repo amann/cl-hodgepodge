@@ -402,9 +402,9 @@
         (setf (gethash new-name name->domain) new-domain
               (gethash new-domain domain->name) new-name)))))
 
-(defsetf find-domain (domain &optional (errorp t) (domain-set *domain-set*)) (new-domain)
+(defsetf find-domain (domain &optional (errorp t) domain-set) (new-domain)
   "Register a new domain object to the domain set DOMAIN-SET (defaulting to *DOMAIN-SET*).  If DOMAIN is a symbol, the value set will be registered under this symbol as name.  If DOMAIN is a domain registered in DOMAIN-SET, it is replaced by value under the old name of DOMAIN; if DOMAIN is not registered an error of type DOMAIN-SET-ERROR is signalled if ERRORP is true or nothing is done if ERRORP is false.  If value is NIL the registration is removed."
-  `(let ((*domain-set* ,domain-set))
+  `(let ((*domain-set* (or ,domain-set *domain-set*)))
      (multiple-value-bind (domain name)
          (find-domain ,domain nil)
        (when (and errorp (null name))
@@ -533,7 +533,7 @@
              (every (lambda (class)
                       (subdomainp class domain))
                     classes)))
-    (awl:find-extrema (dag-border #'common-superdomain (find-domain 'object) #'domain-class-direct-subclasses)
+    (awl::find-extrema (dag-border #'common-superdomain (find-domain 'object) #'domain-class-direct-subclasses)
                       #'subdomainp)))
 
 (defgeneric join2 (d1 d2)
@@ -703,12 +703,12 @@
           subdomainp (compile nil
                               `(lambda (domain)
                                  (and ,@(mapcar (lambda (arg)
-                                                  (containsp domain ,arg))
+                                                  `(containsp domain ,arg))
                                                 args))))
           containsp (compile nil
                              `(lambda (object)
                                 (or ,@(mapcar (lambda (arg)
-                                                (eql ,arg object))
+                                                `(eql ,arg object))
                                               args)))))))
 
 
@@ -1109,18 +1109,33 @@
       (flet ((compute-matchers (body)
                (compile nil `(lambda (args)
                                (ignore-errors
-                                (destructuring-bind (,@g!required ,@(when optional (list* '&optional g!optional)) ,@(when restp (list '&rest g!rest)))
+                                (destructuring-bind (,@g!required
+                                                     ,@(when optional (list* '&optional g!optional))
+                                                     ,@(when restp (list '&rest g!rest)))
                                     args
                                   ,@body))))))
         (list signature
-              (compile nil (compute-matchers `((when (and ,@(mapcar (lambda (var domain) `(in-domain-p ,var ',domain)) g!vars domains)
-                                                          ,@(when restp `((every (lambda (var) (in-domain-p var ',rest)) ,g!rest))))
+              (compile nil (compute-matchers `((when (and ,@(mapcar (lambda (var domain)
+                                                                      `(in-domain-p ,var ',domain))
+                                                                    g!vars domains)
+                                                          ,@(when restp
+                                                              `((every (lambda (var)
+                                                                         (in-domain-p var ',rest))
+                                                                       ,g!rest))))
                                                  ',operation))))
-              (compile nil (compute-matchers `((when (and ,@(mapcar (lambda (var domain) `(subdomainp ,var ',domain)) g!vars domains)
-                                                          ,@(when restp `((every (lambda (var) (subdomainp var ',rest)) ,g!rest))))
+              (compile nil (compute-matchers `((when (and ,@(mapcar (lambda (var domain)
+                                                                      `(subdomainp ,var ',domain))
+                                                                    g!vars domains)
+                                                          ,@(when restp
+                                                              `((every (lambda (var)
+                                                                         (subdomainp var ',rest))
+                                                                       ,g!rest))))
                                                  ',operation))))
-              (compile nil (compute-matchers `((list* ,@(mapcar (lambda (domain) `',domain) domains)
-                                                      ,(when restp `(mapcar (constantly ',rest) ,g!rest)))))))))))
+              (compile nil (compute-matchers `((list* ,@(mapcar (lambda (domain)
+                                                                  `',domain)
+                                                                domains)
+                                                      ,(when restp
+                                                         `(mapcar (constantly ',rest) ,g!rest)))))))))))
 ;;;;*** Axioms
 (defclass axioms () ())
 (defclass operation-axioms (axioms)

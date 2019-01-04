@@ -288,7 +288,8 @@
           (let ((arg (let ((arg (awl::ensure-list arg)))
                        (cons (awl::ensure-list (car arg)) (cdr arg)))))
             (push (make-instance 'key-lambda-argument
-                                 :name (cadar arg) :key (caar arg)
+                                 :name (caar arg)
+                                 :key (or (cadar arg) (intern (string (caar arg)) :keyword ))
                                  :value (cadr arg)
                                  :supplied-p-parameter (caddr arg))
                   result))))

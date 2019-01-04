@@ -2,39 +2,74 @@
 (declaim (optimize debug))
 (in-package "CH.AMANN-WOLOWYK.AWL-SYSTEM")
 
+;;;;* Dictionary
 
-;;;;* Utilities
-(defmacro with-dictionary ((&rest vars) dictionary &body body)
-  "Establish within BODY a lexical binding of variables to value-entries in the dictionary DICTIONARY. The argument VARS is a list of either pairs of symbols-expressions of the form (var expr) or symbols var. The expressions expr or the symbols var, in the latter case, are looked up in DICTIONARY by the mean of the function GET-BINDING, which is accessible in the lexical environment surrounding the macro call. A local macro (BOUND-P var) is defined in the scope of BODY returning true if the variable var is bound within DICTIONARY, i.e. if a value associated to the corresponding expr (or var in the latter case) has been found in the dictionary. The macro relies on the existence in the surrounding environment of the following functions:
-- (get-binding expr) returning a binding cell object of DICTIONARY associated to expr.
-- (binding-val binding) taking a (valid) binding cell object of DICTIONARY and returning the value part of the binding cell."
-  (let ((vars (mapcar (lambda (var)
-                        (typecase var
-                          (cons (first var))
-                          (t var)))
-                      vars))
-        (exprs (mapcar (lambda (var)
-                         (typecase var
-                           (cons (second var))
-                           (t var)))
-                       vars))
-        (g!exprs (map-into (make-list (length vars)) 'gensym))
-        (g!binding-vars (map-into (make-list (length vars)) 'gensym)))
-    (awl:with-gensyms (g!bindings)
-      `(let ((,g!bindings ,dictionary))
-         (let ,(mapcar 'list g!exprs exprs)
-           (let ,g!binding-vars
-             (macrolet ((bound-p (var)
-                          (case var
-                            ,@(mapcar (lambda (var g!binding-var g!expr)
-                                        `(,var `(or ,',g!binding-var
-                                                    (setq ,',g!binding-var (get-binding ,',g!expr ,',g!bindings)))))
-                               vars g!binding-vars g!exprs))))
-               (symbol-macrolet (,@(mapcar (lambda (var g!binding-var g!expr)
-                                             `(,var (binding-val (or ,g!binding-var
-                                                                     (setq ,g!binding-var (get-binding ,g!expr ,g!bindings))))))
-                                           vars g!binding-vars g!exprs))
-                 ,@body))))))))
+(defgeneric awl::lookup (dictionary key)
+  "Lookup for KEY in DICTIONARY. If found, return the corresponding value and a cons (KEY . VALUE) as secondary value, If not found, return NIL, NIL.")
+
+(defgeneric (setf awl::lookup) (value dictionary key)
+  "Set VALUE for KEY in DICTIONARY.")
+
+(defgeneric awl::remove-key (dictionary key)
+  "Remove KEY in DICTIONARY. Return true if DICTIONARY contained KEY.")
+
+(defgeneric awl::to-association-list (dictionary)
+  (declare (optimize speed))
+  (:method ((dictionary null)))
+  (:documentation "Return an association list containing the bindings as conses of key value."))
+
+;;;;** Implementations of Dictionaries
+;;;;*** Hash-Table
+(let ((not-found (gensym)))
+  (defmethod awl::lookup ((dictionary hash-table) key)
+    (let ((value (gethash key dictionary not-found)))
+      (if (eql value not-found)
+          (values nil nil)
+          (values value (cons key value))))))
+(defmethod (setf awl::lookup) (value (dictionary hash-table) key)
+  (setf (gethash key dictionary) value))
+(defmethod awl::remove-key ((dictionary hash-table) key)
+  (remhash key dictionary))
+
+(defmethod awl::to-association-list ((dictionary hash-table))
+  (let (alist)
+    (maphash (lambda (key value) (push (cons key value) alist)) dictionary)
+    alist))
+
+;;;;*** Association List
+(defclass awl::alist ()
+  ((alist :initform nil :initarg :alist)
+   (test :initform 'eql :initarg :test :reader awl::alist-test)))
+
+(defmethod awl::lookup ((dictionary awl::alist) key)
+  (with-slots (alist test)
+      dictionary
+    (let ((binding (assoc key alist :test test)))
+      (if binding
+          (values (car binding) (cons (car binding) (cdr binding)))
+          (values nil nil)))))
+(defmethod (setf awl::lookup) (value (dictionary awl::alist) key)
+  (with-slots (alist test)
+      dictionary
+    (let ((binding (assoc key dictionary :test test)))
+      (if binding
+          (rplacd binding value)
+          (push (cons key value) alist)))))
+(defmethod awl::remove-key ((dictionary awl::alist) key)
+  (with-slots (alist test)
+      dictionary
+    (let (removedp)
+      (progn
+        (delete var alist
+                :key 'car
+                :test (lambda (a b)
+                        (when (funcall test a b)
+                          (setq removedp t))))
+        removedp))))
+(defmethod awl::to-association-list ((dictionary awl::alist))
+  (slot-value dictionary 'alist))
+
+
 ;;;;* Unification of Objects in S-Expressions
 
 (define-condition awl::unification-failure (error)
@@ -46,6 +81,17 @@
                      (awl::unification-failure-expr2 condition)))))
 
 ;;;;** Unify
+
+(defun awl::substitute-variables (bindings expression)
+  "Return an expression based on EXPR but in which all (sub-)expressions of EXPR bound to a value in BINDINGS are recursively substituted by their value, until only unbound (terminal) expressions are left. This function may destructively modify EXPR."
+  (multiple-value-bind (binding-value boundp)
+      (awl::lookup bindings expression)
+    (cond (boundp (awl::substitute-variables bindings binding-value))
+          ((and bindings (consp expression))
+           (cons (awl::substitute-variables bindings (car expr))
+                 (awl::substitute-variables bindings (cdr expr))))
+          (t expr))))
+
 
 (defun unify (expr1 expr2 variablep equal-p &optional bindings)
   "See if the s-expressions EXPR1 and EXPR2 match, where as variables are used objects which satisfy VARIABLEP and which are compared for equality using EQUAL-P. If the s-expressions match, return an association list of bindings of the variables to their constant values, else signal an error of type AWL::UNIFICATION-FAILURE."
@@ -66,137 +112,34 @@
                      (t (fail expr1 expr2 bindings))))
              (unify-var (var expr bindings)
                "Unify VAR and EXPR in the case where VAR is a variable according to VARIABLEP and return the extended binding."
-               (with-dictionary ((val var)
-                                 (expr-val expr))
-                 bindings
-                 (cond ((bound-p val) (unify val expr bindings))
-                       ((bound-p expr-val) (unify var expr-val bindings))
+               (let ((var-binding (get-binding var bindings))
+                     (expr-binding (get-binding expr bindings)))
+                 (cond (var-binding (unify (binding-val var-binding) expr bindings))
+                       (expr-binding (unify var (binding-val expr-binding) bindings))
                        ((occurs-p var expr bindings) (fail var expr bindings))
                        (t (add-binding var expr bindings)))))
              (occurs-p (var expr bindings)
                "Return true if VAR occurs in the value associated in BINDINGS to the expression EXPR with respect to EQUAL-P."
-               (with-dictionary ((val expr)) bindings
+               (let ((var-binding (get-binding var bindings)))
                  (cond ((equal-p var expr) t)
-                       ((bound-p val) (occurs-p var val bindings))
+                       (var-binding (occurs-p var val bindings))
                        ((consp expr) (or (occurs-p var (car expr) bindings)
                                          (occurs-p var (cdr expr) bindings))))))
              (substitute-variables (expr bindings)
                "Return an expression based on EXPR but in which all (sub-)expressions of EXPR bound to a value in BINDINGS are recursively substituted by their value, until only unbound (terminal) expressions are left. This function may destructively modify EXPR."
-               (with-dictionary ((expr-val expr)) bindings
-                 (if (bound-p expr-val)
-                     (substitute-variables expr-val bindings)
-                     (progn (when (and bindings (consp expr))
-                              (setf (car expr) (substitute-variables (car expr) bindings)
-                                    (cdr expr) (substitute-variables (cdr expr) bindings)))
-                            expr)))))
+               (let ((expr-binding (get-binding expr bindings)))
+                 (cond (expr-binding (substitute-variables (binding-val expr-binding) bindings))
+                       ((and bindings (consp expr))
+                        (cons (substitute-variables (car expr) bindings)
+                              (substitute-variables (cdr expr) bindings)))
+                       (t expr)))))
       (values (let ((bindings (unify expr1 expr2 bindings)))
                 (dolist (binding bindings bindings)
                   (setf (cdr binding) (substitute-variables (cdr binding) bindings))))
               equal-p))))
 
-;;;;* Dictionaries
-
-;;;;** Binding Cells
-(defstruct (binding
-            (:type list)
-            (:constructor make-binding (var val)))
-  var val)
-(declaim (inline to-cons))
-(defun to-cons (binding)
-  (cons (binding-var binding) (binding-val binding)))
-
-;;;;** Dictionary
-
-(defgeneric get-binding (dictionary var &key &allow-other-keys)
-  (declare (optimize speed))
-  (:argument-precedence-order dictionary var)
-  (:documentation "Return an object being the binding-cell of VAR in the dictionary DICTIONARY and whose value can be extracted with binding-val. If no binding exists, return nil."))
-
-(defgeneric (setf get-binding) (val dictionary var &key &allow-other-keys)
-  (declare (optimize speed))
-  (:argument-precedence-order dictionary var val)
-  (:documentation "Set the binding of VAR to VAL to the dictionary DICTIONARY and return the corresponding binding cell. Primary methods which specialize this generic function must take as argument VAL the binding object.")
-  (:method :around (var dictionary val &rest keys &key &allow-other-keys)
-    (let ((binding (apply 'get-binding var dictionary keys)))
-      (if binding
-          (setf (binding-val binding) val)
-          (call-next-method (make-binding var val) dictionary var))
-      binding)))
-
-(defgeneric rem-binding (dictionary key &key &allow-other-keys)
-  (declare (optimize speed))
-  (:argument-precedence-order dictionary key)
-  (:documentation "Remove the binding for variable VAR in dictionary DICTIONARY and return the modified dictionary (which does not need to be EQL to the original dictionary) and as secondary value true if there was such binding, false otherwise."))
-
-(defgeneric awl::lookup (dictionary key &key &allow-other-keys)
-  (declare (optimize speed))
-  (:argument-precedence-order dictionary key)
-  (:documentation "Lookup for KEY in DICTIONARY. If found, return the corresponding value and the binding-cell as secondary value, If not found, return NIL, NIL.")
-  (:method (dictionary var &rest keys &key &allow-other-keys)
-    (let ((binding (apply 'get-binding var dictionary keys)))
-      (when binding
-        (values (binding-val binding)
-                binding)))))
-
-(defgeneric awl::to-association-list (dictionary)
-  (declare (optimize speed))
-  (:method ((dictionary null)))
-  (:documentation "Return an association list containing the bindings as conses of key val."))
-
-
-
-;;;;** Implementations of Dictionaries
-
-;;;;*** Hash-Table
-
-(defmethod get-binding ((dictionary hash-table) var &key &allow-other-keys)
-  (gethash var dictionary))
-(defmethod (setf get-binding) (binding (dictionary hash-table) var &key &allow-other-keys)
-  (setf (gethash var dictionary) binding))
-(defmethod rem-binding ((dictionary hash-table) var &key &allow-other-keys)
-  (values dictionary (remhash var dictionary)))
-(defmethod awl::to-association-list ((dictionary hash-table))
-  (loop :for binding :being :each :hash-value :in dictionary
-        :collect (to-cons binding)))
-
-;;;;*** Association List
-
-(defmethod get-binding ((dictionary list) var &key (test 'eql) &allow-other-keys)
-  (find var dictionary :key 'binding-var :test test))
-(defmethod (setf get-binding) (val (dictionary list) var &key &allow-other-keys)
-  (push val dictionary))
-(defmethod rem-binding ((dictionary list) var &key (test 'eql) &allow-other-keys)
-  (let (removedp)
-    (values (delete var dictionary
-                    :key 'binding-var
-                    :test (lambda (a b)
-                            (when (funcall test a b)
-                              (setq removedp t))))
-            removedp)))
-(defmethod awl::to-association-list ((dictionary list))
-  (mapcar 'to-cons dictionary))
-
-;;;;* Environment
-;;;; An object containing bindings
-(defclass awl::environment ()
-  ((bindings :initform nil :initarg :bindings)
-   (test :initform 'eql :initarg :test :reader environment-test)))
-
-(defmethod get-binding ((environment awl::environment) var &key &allow-other-keys)
-  (with-slots (bindings test)
-      (get-binding bindings var :test test)))
-(defmethod (setf get-binding) (val (environment awl::environment) var &key &allow-other-keys)
-  (with-slots (bindings test)
-      (setf (get-binding bindings var :test test) val)))
-(defmethod rem-binding ((environment awl::environment) var &key &allow-other-keys)
-  (with-slots (bindings test)
-      (values environment
-              (nth-value 1 (rem-binding bindings var :test test)))))
-(defmethod awl::to-association-list ((environment awl::environment))
-  (awl::to-association-list (slot-value environment 'bindings)))
-
 ;;;;* Unify
-(declare (inline awl::unify))
+(declaim (inline awl::unify))
 (defun awl::unify (expr1 expr2 variablep equal-p &optional bindings)
   "See if the s-expressions EXPR1 and EXPR2 match, where as variables are used objects which satisfy VARIABLEP and which are compared for equality using EQUAL-P. If the s-expressions match, return an association list of bindings of the variables to their constant values, else signal an error of type AWL::UNIFICATION-FAILURE."
   (unify expr1 expr2 variablep equal-p (awl::to-association-list bindings)))

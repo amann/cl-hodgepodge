@@ -485,7 +485,7 @@
 
 ;;;;** 
 (defun awl::map-into* (result-sequence function &rest iterables)
-  "Destructively modifies RESULT-SEQUENCE to contain the results of applying function to each element in the argument ITERABLES in turn.  ITERABLES are objects for which there exist a method of the the generic function AWL::MAKE-GENERATOR."
+  "Destructively modifies RESULT-SEQUENCE to contain the results of applying function to each element in the argument ITERABLES in turn.  ITERABLES are objects for which there exists a method of the the generic function AWL::MAKE-GENERATOR."
   (let ((generators (mapcar 'awl::make-generator iterables)))
     (handler-case
         (map-into result-sequence
@@ -505,51 +505,55 @@
 ;;;;* String Manipulation using Iterators
 
 (defun awl::make-string-splitter-factory (targets &key escape-char max-chunks from-end eof-signal-p)
-  (let ((no-next-element (when eof-signal-p (make-condition 'awl::no-next-element-condition
+  (let ((no-next-element (when eof-signal-p (make-condition 'awl::no-next-item-error
                                                             :generator (format nil "#<string-splitter ~S, ~S, ~S, ~S>"
                                                                                targets escape-char max-chunks from-end))))
-        (matcher (awl::make-string-matcher targets escape-char from-end)))
+        (matcher (when (or (null max-chunks)
+                           (< 1 max-chunks))
+                   (awl::make-string-matcher targets escape-char from-end))))
     (compile nil
              `(lambda (string &optional (start 0) end)
-                (let ((status ,(if max-chunks
-                                   (cond
-                                     ((< 1 max-chunks)
-                                      :continue)
-                                     ((= 1 max-chunks)
-                                      :single-element)
-                                     ((= 0 max-chunks)
-                                      :empty))
-                                   :continue))
-                      (s start)
-                      (e end)
-                      ,@(when max-chunks `((remaining-chunks ,max-chunks))))
-                  (setq start 0 end nil)
-                  (lambda ()
-                    (case status
-                      ((:continue)
-                       ,(when max-chunks `(when (= 1 (decf remaining-chunks))
-                                            (setq status :last-element)))
-                       (multiple-value-bind ,(if from-end
-                                                 '(next-end start)
-                                                 '(end next-start))
-                           (funcall ,matcher string s e)
-                         (prog1
-                             (subseq string start end)
-                           ,(if from-end
-                                `(if next-end
-                                     (setq end next-end
-                                           e next-end)
-                                     (setq status :empty))
-                                `(if next-start
-                                     (setq start next-start
-                                           s next-start)
-                                     (setq status :empty))))))
-                      (:last-element
-                       (setq status :empty)
-                       (subseq string ,(if from-end 0 'start) ,(when from-end 'end)))
-                      (:single-element
-                       (subseq string 0))
-                      (:empty ,(when eof-signal-p `(signal ,no-next-element))))))))))
+                ,@(cond ((or (null max-chunks)
+                             (< 1 max-chunks))
+                         `((let ((status :continue)
+                                 (s start)
+                                 (e end)
+                                 ,@(when max-chunks `((remaining-chunks ,max-chunks))))
+                             (declare (type (member :continue :empty ,@(when max-chunks '(:last-element))) status))
+                             (setq start 0 end nil)
+                             (lambda ()
+                               (case status
+                                 ((:continue)
+                                  ,@(when max-chunks `((when (= 1 (decf remaining-chunks))
+                                                         (setq status :last-element))))
+                                  (multiple-value-bind ,(if from-end
+                                                            '(next-end start)
+                                                            '(end next-start))
+                                      (funcall ,matcher string s e)
+                                    (prog1
+                                        (subseq string (or start 0) end)
+                                      ,(if from-end
+                                           `(if next-end
+                                                (setq end next-end
+                                                      e next-end)
+                                                (setq status :empty))
+                                           `(if next-start
+                                                (setq start next-start
+                                                      s next-start)
+                                                (setq status :empty))))))
+                                 ,@(when max-chunks
+                                     `((:last-element
+                                        (setq status :empty)
+                                        (subseq string ,(if from-end 0 'start) ,(when from-end 'end)))))
+                                 (:empty ,(when eof-signal-p `(error ,no-next-element))))))))
+                        ((= 1 max-chunks)
+                         `((declare (ignore start end))
+                           (lambda ()
+                             (subseq string 0))))
+                        (t
+                         `((declare (ignore string start end))
+                           (lambda ()
+                             ,(when eof-signal-p `(error ,no-next-element))))))))))
 
 (defun awl::make-string-splitter (targets &optional escape-char max-chunks from-end)
   (awl::fbind ((make-string-splitter (awl::make-string-splitter-factory targets

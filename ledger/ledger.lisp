@@ -12,15 +12,16 @@
   (dolist (day holidays)
     (remhash (awl:parse-date day :iso8601) *holidays*)))
 
-(defun holiday-p (date-time &optional time-zone
-                  &aux (date-time (awl:parse-date date-time :iso8601)))
+(defun holiday-p (date-time &optional time-zone)
   (or (awl:sat-sun-p date-time time-zone)
       (gethash date-time *holidays*)))
 
 (defun bdc-forward (date-time)
-  (awl:first-working-day date-time #'holiday-p))
+  (with-dates (date-time)
+    (awl:first-working-day date-time #'holiday-p)))
 (defun bdc-backward (date-time)
-  (awl:last-working-day date-time #'holiday-p))
+  (with-dates (date-time)
+    (awl:last-working-day date-time #'holiday-p)))
 (defun bdc-modified-forward (date-time)
   (let ((bdc-forward (bdc-forward date-time)))
     (if (/= (awl:get-month date-time) (awl:get-month bdc-forward))
@@ -183,19 +184,8 @@
                                          nbr
                                          (- nbr shift))
                             time-zone)))))
-(defstruct payment
-  date amount from to) 
 
 
-
-(defvar *ledger* nil)
-
-#+(or)
-(with-ledger ()
-  (dcfrom 'postfinance
-        (on (awl:map-generators 'bdc-forward (cycle "2018-1-1" "m" "2018-12-1"))
-            (give (scale 493.6 'chf)
-                  :to 'krankenkasse))))
 
 (defun mingle (predicate key &rest generators)
   (let ((generators (mapcar 'list (mapcar 'awl:make-generator generators))))
@@ -231,3 +221,51 @@
                          (if (some-not-empty-p)
                              (next (smallest generators))
                              (error 'awl:no-next-item-error :generator this))))))))))
+
+(defstruct payment
+  date amount unit from to) 
+
+
+
+(defvar *ledger* nil)
+
+(defmacro with-ledger ((&optional (ledger *ledger*)) &body body)
+  (declare (ignore ledger body)))
+(defmacro with-ccy (ccy &body body)
+  (declare (ignore ccy body)))
+(defmacro from (account &body body)
+  (declare (ignore account body)))
+(defmacro to (account &body body)
+  (declare (ignore account body)))
+(defmacro on (dates &body body)
+  (declare (ignore dates body)))
+(defmacro give (item &key from to)
+  (declare (ignore item from to)))
+(defmacro amount (amount &optional unit)
+  (declare (ignore amount unit)))
+(defmacro all (&rest items)
+  (declare (ignore items)))
+
+#+(or)
+(with-ledger ()
+  (with-ccy 'chf
+    (from 'postfinance
+          (on (cycle "2018-1-1" "m" "2018-12-1" :bdc :bwd)
+              (give (amount 493.6)
+                    :to 'krankenkasse)))))
+
+#+(or)
+(defmacro on-dates ((date-name date-sequence) &body body)
+  )
+
+
+
+(flet ((variable-p (expr)
+         (and (consp expr)
+              (eq (car expr) :var)))
+       (equal-p (a b)
+         (funcall 'equalp a b)))
+
+  (awl:unify '(+ (* 2 (:var a)) 3) '(+ (:var b) (:var c)) #'variable-p #'equal-p))
+
+
