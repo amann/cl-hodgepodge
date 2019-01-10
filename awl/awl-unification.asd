@@ -9,5 +9,6 @@
   :components
   ((:module "src"
             :components
-            ((:file "awl-unify"))))
+            ((:file "awl-unification")
+             (:file "awl-treesearch"))))
   :serial t)

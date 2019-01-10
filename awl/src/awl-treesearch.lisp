@@ -9,7 +9,7 @@
 ;;;;*** Priority Queue
 ;;;;
 ;;;; We implement a priority queue as a binary heap.
-(define-condition awl::empty-queue-error (error) ())
+(define-condition empty-queue-error (error) ())
 (defun awl::make-priority-queue (order-predicate &key key
                                                    (element-type t) initial-contents)
   "Return a priority queue implemented as a binary heap on an array. The priority of the items of the queue is determined by comparing with ORDER-PREDICATE the results obtained when applying KEY to the items (when KEY is NIL the items are compared directly). The priority queue supports following methods:
@@ -124,7 +124,7 @@
                    (precedent (state) (let ((node (get-visited state)))
                                         (when node (%node-precedent node)))))
               (declare (inline add-visited current-cost precedent))
-              (let ((openset (make-priority-queue #'< :key #'%node-score)))
+              (let ((openset (awl::make-priority-queue #'< :key #'%node-score)))
                 (macrolet ((with-state (state (&key score cost precedent) &body body)
                              (let ((g!state (gensym "STATE"))
                                    (g!node (gensym "NODE")))
@@ -167,11 +167,13 @@
                                    (if (funcall goalp next-state)
                                        (values (extract-path next-state nil) (current-cost next-state) t)
                                        (expand next-state))))))
-                      (add-visited start :score (heuristic start) :cost 0)
-                      (expand start))))))))))))
+                      (if (funcall goalp start)
+                          (list start)
+                          (progn (add-visited start :score (heuristic start) :cost 0)
+                                 (expand start))))))))))))))
 
-(defun awl::breadth-first-search (start goalp children-fn)
-  (let ((visited (make-hash-table)))
+(defun awl::breadth-first-search (start goalp children-fn &key (test #'eql))
+  (let ((visited (make-hash-table :test test)))
     (flet ((visitedp (node) (nth-value 1 (gethash node visited)))
            (precedent (node) (gethash node visited))
            ((setf precedent) (precedent node) (setf (gethash node visited) precedent)) 
@@ -221,8 +223,8 @@
                                                                     (member p obstacles :test equality)
                                                                     (= p point)))
                                                     (funcall adjacent-fn point))))) (values
-      (breadth-first-search start (lambda (p) (= p goal)) neighbours-fn)
-      (let ((get-path (a*-search-factory cost-fn heuristic-fn neighbours-fn '=)))
+      (awl::breadth-first-search start (lambda (p) (= p goal)) neighbours-fn)
+      (let ((get-path (awl::a*-search-factory cost-fn heuristic-fn neighbours-fn '=)))
         (funcall get-path start (lambda (p) (= p goal))))))))
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
